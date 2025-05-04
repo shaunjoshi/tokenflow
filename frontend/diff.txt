@@ -1,0 +1,468 @@
+diff --git a/backend/api.py b/backend/api.py
+index 0595390..a01d44a 100644
+--- a/backend/api.py
++++ b/backend/api.py
+@@ -3,7 +3,7 @@ import requests
+ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+ from fastapi.middleware.cors import CORSMiddleware
+ from langchain.text_splitter import CharacterTextSplitter
+-from langchain_chroma import Chroma
++from langchain_community.vectorstores import Chroma
+ from pydantic import BaseModel
+ 
+ app = FastAPI()
+diff --git a/frontend/clients/supabaseClient.ts b/frontend/clients/supabaseClient.ts
+index c6b4a42..6a86b14 100644
+--- a/frontend/clients/supabaseClient.ts
++++ b/frontend/clients/supabaseClient.ts
+@@ -2,6 +2,12 @@ import { createClient } from '@supabase/supabase-js'
+ 
+ const supabaseUrl = 'https://hlizjdprcsnfjwtxerhl.supabase.co'
+ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_KEY
+-const supabase = createClient(supabaseUrl, supabaseKey)
++const supabase = createClient(supabaseUrl, supabaseKey, {
++    auth: {
++        persistSession: true,
++        autoRefreshToken: true,
++        detectSessionInUrl: true,
++    },
++});
+ 
+ export { supabase }
+\ No newline at end of file
+diff --git a/frontend/components/Auth.tsx b/frontend/components/Auth.tsx
+index 7244832..f6938e0 100644
+--- a/frontend/components/Auth.tsx
++++ b/frontend/components/Auth.tsx
+@@ -32,10 +32,14 @@ export default function Auth() {
+         if (isSignUp) {
+             ({ error } = await supabase.auth.signUp({ email, password }));
+         } else {
+-            ({ error } = await supabase.auth.signInWithPassword({ email, password }));
++            let data;
++            ({ data, error } = await supabase.auth.signInWithPassword({ email, password }));
++            console.log("LOGIN data:", data);
+         }
+ 
+ 
++        console.log("LOGIN error:", error);
++
+         if (error) {
+             setMessage({ type: 'error', text: error.message });
+         } else {
+diff --git a/frontend/components/ChatContainer.tsx b/frontend/components/ChatContainer.tsx
+index 6fec2e5..44381f6 100644
+--- a/frontend/components/ChatContainer.tsx
++++ b/frontend/components/ChatContainer.tsx
+@@ -1,44 +1,51 @@
+ // src/components/ChatContainer.tsx
+-import React, { useState } from 'react';
+-import { Box, Container, ThemeProvider, createTheme } from '@mui/material';
+-import Layout from './Layout';
++import React, { useState, useRef, useEffect } from 'react';
++import { Box, Container } from '@mui/material';
+ import ChatPanel from './ChatPanel';
+ import InputPanel from './InputPanel';
+ 
+-const theme = createTheme({
+-    palette: {
+-        mode: 'light',
+-        primary: { main: '#1976d2' },
+-        secondary: { main: '#9c27b0' },
+-    },
+-    typography: {
+-        fontFamily: 'Roboto, sans-serif',
+-    },
+-});
+-
+-export default function ChatContainer({ user_id }: { user_id: string }) {
++type ChatContainerProps = {
++    user_id: string;
++    onLogout?: () => void; // optional unless required
++};
++export default function ChatContainer({ user_id, onLogout}: { user_id: string, onLogout?: () => void }) {
+     const [messages, setMessages] = useState([]);
+     const [input, setInput] = useState('');
+     const [loading, setLoading] = useState(false);
+-    const [file, setFile] = useState<File | null>(null);
++    const chatRef = useRef<HTMLDivElement>(null);
++
++    onLogout && onLogout(); // ✅ Call onLogout if it's provided
++    // Auto scroll to bottom on new message
++    useEffect(() => {
++        if (chatRef.current) {
++            chatRef.current.scrollTop = chatRef.current.scrollHeight;
++        }
++    }, [messages, loading]);
+ 
+     return (
+-        <ThemeProvider theme={theme}>
+-            <Layout>
+-                <Container maxWidth="sm">
+-                    <Box mt={4} display="flex" flexDirection="column" alignItems="center">
+-                        <ChatPanel messages={messages} loading={loading} />
+-                        <InputPanel
+-                            input={input}
+-                            setInput={setInput}
+-                            setMessages={setMessages}
+-                            messages={messages}
+-                            user_id={user_id}
+-                            setLoading={setLoading}
+-                        />
+-                    </Box>
+-                </Container>
+-            </Layout>
+-        </ThemeProvider>
++        <Container maxWidth="md" disableGutters>
++            <Box
++                sx={{
++                    height: 'calc(100vh - 80px)',
++                    display: 'flex',
++                    flexDirection: 'column',
++                    backgroundColor: '#f9fafb',
++                    borderRadius: 2,
++                    overflow: 'hidden',
++                    boxShadow: '0 0 16px rgba(0,0,0,0.04)',
++                    mt: '64px',
++                }}
++            >
++                <ChatPanel messages={messages} loading={loading} chatRef={chatRef} />
++                <InputPanel
++                    input={input}
++                    setInput={setInput}
++                    setMessages={setMessages}
++                    messages={messages}
++                    user_id={user_id}
++                    setLoading={setLoading}
++                />
++            </Box>
++        </Container>
+     );
+ }
+diff --git a/frontend/components/ChatPanel.tsx b/frontend/components/ChatPanel.tsx
+index 2d20c4e..5ef3346 100644
+--- a/frontend/components/ChatPanel.tsx
++++ b/frontend/components/ChatPanel.tsx
+@@ -1,50 +1,87 @@
+ // src/components/ChatPanel.tsx
+-import React from 'react';
+-import { Avatar, Box, Paper, Typography } from '@mui/material';
++import { Avatar, Box, Typography } from '@mui/material';
++import ReactMarkdown from 'react-markdown';
+ import PersonIcon from '@mui/icons-material/Person';
+ import SmartToyIcon from '@mui/icons-material/SmartToy';
+-import ReactMarkdown from 'react-markdown';
+ 
+-export default function ChatPanel({ messages, loading }: any) {
++export default function ChatPanel({ messages, loading, chatRef }: any) {
+     return (
+-        <Paper elevation={2} sx={{ width: '100%', p: 2, borderRadius: 2, height: 400, overflowY: 'auto', backgroundColor: '#f9f9f9', display: 'flex', flexDirection: 'column' }}>
+-            {messages.length === 0 ? (
+-                <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 'auto', mb: 'auto' }}>
+-                    Start a conversation...
++        <Box
++            ref={chatRef}
++            sx={{
++                flex: 1,
++                overflowY: 'auto',
++                px: 3,
++                py: 2,
++                display: 'flex',
++                flexDirection: 'column',
++                gap: 2,
++            }}
++        >
++            {messages.length === 0 && !loading && (
++                <Typography variant="body2" color="text.secondary" align="center" mt={20}>
++                    Start a conversation with your agent...
+                 </Typography>
+-            ) : (
+-                messages.map((msg: any, index: number) => (
+-                    <React.Fragment key={index}>
+-                        <Box display="flex" justifyContent="flex-end" mb={1}>
+-                            <Box display="flex" flexDirection="column" alignItems="flex-end">
+-                                <Avatar sx={{ width: 24, height: 24, bgcolor: 'primary.main', mb: 0.5 }}>
+-                                    <PersonIcon fontSize="small" />
+-                                </Avatar>
+-                                <Box sx={{ backgroundColor: '#e3f2fd', p: 1.5, borderRadius: 2, maxWidth: '75%', whiteSpace: 'pre-wrap' }}>
+-                                    <Typography variant="body2">{msg.user}</Typography>
+-                                </Box>
++            )}
++
++            {messages.map((msg: any, index: number) => (
++                <Box key={index}>
++                    {/* User message */}
++                    <Box display="flex" justifyContent="flex-end" mb={1}>
++                        <Box display="flex" alignItems="flex-end" gap={1}>
++                            <Box
++                                sx={{
++                                    backgroundColor: '#e3f2fd',
++                                    px: 2,
++                                    py: 1,
++                                    borderRadius: 2,
++                                    maxWidth: '70%',
++                                    whiteSpace: 'pre-wrap',
++                                }}
++                            >
++                                <Typography variant="body2">{msg.user}</Typography>
+                             </Box>
++                            <Avatar sx={{ bgcolor: 'primary.main', width: 28, height: 28 }}>
++                                <PersonIcon fontSize="small" />
++                            </Avatar>
+                         </Box>
+-                        <Box display="flex" justifyContent="flex-start" mb={2}>
+-                            <Box display="flex" flexDirection="column" alignItems="flex-start">
+-                                <Avatar sx={{ width: 24, height: 24, bgcolor: '#777', mb: 0.5 }}>
+-                                    <SmartToyIcon fontSize="small" />
+-                                </Avatar>
+-                                <Box sx={{ backgroundColor: '#eeeeee', p: 1.5, borderRadius: 2, maxWidth: '75%', whiteSpace: 'pre-wrap' }}>
++                    </Box>
++
++                    {/* Bot message */}
++                    <Box display="flex" justifyContent="flex-start">
++                        <Box display="flex" alignItems="flex-start" gap={1}>
++                            <Avatar sx={{ bgcolor: '#999', width: 28, height: 28 }}>
++                                <SmartToyIcon fontSize="small" />
++                            </Avatar>
++                            <Box
++                                sx={{
++                                    backgroundColor: '#f1f1f1',
++                                    px: 2,
++                                    py: 1,
++                                    borderRadius: 2,
++                                    maxWidth: '70%',
++                                    whiteSpace: 'pre-wrap',
++                                }}
++                            >
++                                <Typography variant="body2" component="div">
+                                     <ReactMarkdown>{msg.bot}</ReactMarkdown>
+-                                </Box>
++                                </Typography>
+                             </Box>
+                         </Box>
+-                    </React.Fragment>
+-                ))
+-            )}
+-            {loading && (
+-                <Box display="flex" justifyContent="flex-start" mt={1}>
+-                    <Box sx={{ backgroundColor: '#eeeeee', p: 1.5, borderRadius: 2, maxWidth: '75%', fontStyle: 'italic', color: 'gray' }}>
+-                        <Typography variant="body2">Typing...</Typography>
+                     </Box>
+                 </Box>
++            ))}
++
++            {loading && (
++                <Box display="flex" alignItems="center" gap={1} mt={1}>
++                    <Avatar sx={{ bgcolor: '#999', width: 28, height: 28 }}>
++                        <SmartToyIcon fontSize="small" />
++                    </Avatar>
++                    <Typography variant="body2" fontStyle="italic" color="text.secondary">
++                        Typing...
++                    </Typography>
++                </Box>
+             )}
+-        </Paper>
++        </Box>
+     );
+ }
+diff --git a/frontend/components/Dashboard.tsx b/frontend/components/Dashboard.tsx
+index 72075e5..b943d9b 100644
+--- a/frontend/components/Dashboard.tsx
++++ b/frontend/components/Dashboard.tsx
+@@ -1,64 +1,36 @@
+-import { useEffect, useState } from 'react';
+ import { supabase } from '../clients/supabaseClient';
+ import ChatContainer from './ChatContainer';
+ import Auth from './Auth';
+-import {
+-    AppBar,
+-    Box,
+-    Toolbar,
+-    IconButton,
+-    Typography,
+-    Tooltip,
+-    useTheme,
+-} from '@mui/material';
+-import AccountCircle from '@mui/icons-material/AccountCircle';
++import Layout from './Layout';
++import { CircularProgress, Box } from '@mui/material';
++import useSupabaseSession from './AuthSession'; // your custom session hook
+ 
+ export default function Dashboard() {
+-    const [session, setSession] = useState<any>(null);
+-    const theme = useTheme();
+-
+-    useEffect(() => {
+-        supabase.auth.getSession().then(({ data }) => setSession(data.session));
+-        const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+-            setSession(session);
+-        });
+-        return () => {
+-            listener.subscription.unsubscribe();
+-        };
+-    }, []);
++    const { session, loading } = useSupabaseSession(); // ✅ use only this
+ 
+     const handleLogout = async () => {
+         await supabase.auth.signOut();
+-        setSession(null);
++        // Supabase will automatically clear the session, and your hook will update
+     };
+ 
++    if (loading) {
++        return (
++            <Box
++                display="flex"
++                justifyContent="center"
++                alignItems="center"
++                minHeight="100vh"
++            >
++                <CircularProgress />
++            </Box>
++        );
++    }
++
+     if (!session) return <Auth />;
+ 
+     return (
+-        <Box sx={{ flexGrow: 1 }}>
+-            {/* Top App Bar with Account Icon */}
+-            <AppBar position="static" elevation={1} color="default">
+-                <Toolbar sx={{ justifyContent: 'space-between' }}>
+-                    <Typography variant="h6" color="inherit">
+-                        alkme.ai
+-                    </Typography>
+-
+-                    <Tooltip title={`Sign out (${session.user.email})`}>
+-                        <IconButton
+-                            edge="end"
+-                            color="primary"
+-                            onClick={handleLogout}
+-                        >
+-                            <AccountCircle fontSize="large" />
+-                        </IconButton>
+-                    </Tooltip>
+-                </Toolbar>
+-            </AppBar>
+-
+-            {/* Main chat content below navbar */}
+-            <Box sx={{ p: 2 }}>
+-                <ChatContainer user_id={session.user.id} />
+-            </Box>
+-        </Box>
++        <Layout>
++            <ChatContainer user_id={session.user.id} onLogout={handleLogout} />
++        </Layout>
+     );
+ }
+diff --git a/frontend/components/InputPanel.tsx b/frontend/components/InputPanel.tsx
+index d96e76b..07dce7a 100644
+--- a/frontend/components/InputPanel.tsx
++++ b/frontend/components/InputPanel.tsx
+@@ -1,50 +1,74 @@
+ // src/components/InputPanel.tsx
+-import { IconButton, TextField } from '@mui/material';
++import { Box, IconButton, Paper, TextField } from '@mui/material';
+ import SendIcon from '@mui/icons-material/Send';
+ import axios from 'axios';
+ 
+-export default function InputPanel({ input, setInput, setMessages, messages, user_id, setLoading }: any) {
++export default function InputPanel({
++    input,
++    setInput,
++    setMessages,
++    messages,
++    user_id,
++    setLoading,
++}: any) {
+     const sendMessage = async () => {
+         if (!input.trim()) return;
+         const userMessage = input;
+         setInput('');
+         setLoading(true);
+-        setMessages((prev: any) => [...prev, { user: userMessage, bot: '...' }]);
++        setMessages([...messages, { user: userMessage, bot: '...' }]);
+ 
+         try {
+             const res = await axios.post(`${process.env.NEXT_PUBLIC_API_BASE_URL}/chat`, {
+                 query: userMessage,
+                 user_id,
+             });
+-            const botReply = res.data?.choices?.[0]?.message?.content || 'No response from AI';
+-            setMessages((prev: any) => {
+-                const updated = [...prev];
+-                updated[updated.length - 1] = { user: userMessage, bot: botReply };
+-                return updated;
+-            });
+-        } catch {
+-            setMessages((prev: any) => {
+-                const updated = [...prev];
+-                updated[updated.length - 1] = { user: userMessage, bot: 'Error processing request.' };
+-                return updated;
+-            });
++
++            const botReply =
++                res.data?.choices?.[0]?.message?.content || 'No response from AI';
++
++            const updated = [...messages];
++            updated.push({ user: userMessage, bot: botReply });
++            setMessages(updated);
++        } catch (err) {
++            const updated = [...messages];
++            updated.push({ user: userMessage, bot: 'An error occurred.' });
++            setMessages(updated);
+         }
+ 
+         setLoading(false);
+     };
+ 
+     return (
+-        <form
++        <Paper
++            component="form"
+             onSubmit={(e) => {
+                 e.preventDefault();
+                 sendMessage();
+             }}
+-            style={{ display: 'flex', width: '100%', marginTop: '1rem' }}
++            sx={{
++                p: 1,
++                display: 'flex',
++                alignItems: 'center',
++                borderTop: '1px solid #e0e0e0',
++                backgroundColor: 'white',
++            }}
+         >
+-            <TextField fullWidth label="Ask something..." variant="outlined" value={input} onChange={(e) => setInput(e.target.value)} />
+-            <IconButton color="primary" type="submit" sx={{ ml: 1 }}>
++            <TextField
++                placeholder="Ask something..."
++                variant="outlined"
++                fullWidth
++                size="small"
++                value={input}
++                onChange={(e) => setInput(e.target.value)}
++                sx={{
++                    backgroundColor: '#f8f9fa',
++                    borderRadius: 2,
++                }}
++            />
++            <IconButton type="submit" color="primary" sx={{ ml: 1 }}>
+                 <SendIcon />
+             </IconButton>
+-        </form>
++        </Paper>
+     );
+ }
+diff --git a/frontend/components/NavBar.tsx b/frontend/components/NavBar.tsx
+index d46353c..4afca12 100644
+--- a/frontend/components/NavBar.tsx
++++ b/frontend/components/NavBar.tsx
+@@ -5,7 +5,6 @@ import {
+     Toolbar,
+     Typography,
+     Button,
+-    Box,
+     Stack,
+     useTheme,
+     Container,
