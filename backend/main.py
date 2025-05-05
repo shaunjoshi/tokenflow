@@ -40,6 +40,14 @@ from backend.shared import settings, get_current_user
 # from langchain.text_splitter import CharacterTextSplitter
 # from langchain_community.vectorstores import Chroma
 
+# --- Import for LLMLingua --- NEW
+try:
+    import llmlingua
+    LLMLINGUA_AVAILABLE = True
+except ImportError:
+    LLMLINGUA_AVAILABLE = False
+    logging.warning("llmlingua not available. Compression features will be disabled.")
+
 # --- Logging Setup ---
 # Configure logging (consider moving to shared.py or a dedicated logging setup)
 logging.basicConfig(
@@ -51,6 +59,28 @@ log = logging.getLogger(__name__)  # Logger for this module
 # --- App State for Clients & Analyzers ---
 # Stores clients initialized during startup
 app_state: Dict[str, Any] = {}
+
+# --- LLMLingua Compressor Instance --- NEW
+# Initialize compressor once globally (or manage via lifespan if preferred)
+# Note: LLMLingua might download models on first run.
+lingua_compressor: Optional[llmlingua.PromptCompressor] = None
+if LLMLINGUA_AVAILABLE:
+    try:
+        # Consider initializing in lifespan for cleaner management
+        # For simplicity here, initialize globally. Choose model as needed.
+        lingua_compressor = llmlingua.PromptCompressor(
+            model_name="microsoft/llmlingua-2-xlm-roberta-large-meetingbank", # Or choose another model
+            use_llmlingua2=True, # Use LLMLingua2
+            # --- Explicitly set device to CPU --- 
+            device_map="cpu" 
+            # --- End Explicit CPU setting ---
+        )
+        log.info("LLMLingua compressor initialized successfully using CPU.")
+    except Exception as e:
+        log.error(f"Failed to initialize LLMLingua compressor: {e}")
+        lingua_compressor = None
+else:
+    log.warning("LLMLingua dependency not found, compressor not initialized.")
 
 
 # Add these near your other Pydantic models in main.py
@@ -173,6 +203,10 @@ async def lifespan(app: FastAPI):
 
     log.info("Client/Analyzer initialization process complete.")
     
+    # --- ADDED: Store compressor in app_state (if initialized globally) ---
+    app_state["lingua_compressor"] = lingua_compressor
+    # --- END ADDED ---
+    
     yield  # Application runs after yield
     
     # --- Shutdown Logic ---
@@ -249,6 +283,30 @@ class ClassificationResponse(PydanticBaseModel):
     recommended_model: str
 
 
+# --- Pydantic Models for Compression --- NEW
+class CompressionRequest(PydanticBaseModel):
+    text: str = Field(..., min_length=10, description="The text to compress")
+    target_token: int = Field(default=100, gt=0, description="Target number of tokens after compression")
+    # Add other llmlingua parameters if needed (e.g., rank_method, context_budget)
+
+class CompressionResponse(PydanticBaseModel):
+    original_text: str
+    compressed_text: str
+    original_tokens: int
+    compressed_tokens: int
+    compression_ratio: float
+    # Add other llmlingua output fields if desired
+
+
+# --- Pydantic Models for Direct Generation --- NEW
+class GenerateRequest(PydanticBaseModel):
+    prompt: str = Field(..., min_length=1, description="The prompt to send to the LLM")
+    model: str = Field(..., description="The specific OpenRouter model ID to use (e.g., 'anthropic/claude-3-sonnet:beta')")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for model generation")
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p for model generation")
+    max_tokens: int = Field(default=250, gt=0, description="Maximum tokens to generate")
+
+
 # --- Dependency Injectors for Clients/Tools ---
 def get_supabase_client() -> AsyncClient:
     """Dependency injector for the initialized Supabase client."""
@@ -284,6 +342,16 @@ def get_text_splitter() -> RecursiveCharacterTextSplitter:
         log.error("Text splitter requested but is not available (initialization failed?).")
         raise HTTPException(status_code=503, detail="Text processing service temporarily unavailable.")
     return splitter
+
+
+# --- Dependency Injector for LLMLingua --- NEW
+def get_lingua_compressor() -> llmlingua.PromptCompressor:
+    """Dependency injector for the initialized LLMLingua compressor."""
+    compressor = app_state.get("lingua_compressor")
+    if compressor is None:
+        log.error("LLMLingua compressor requested but is not available (initialization failed or dependency missing?).")
+        raise HTTPException(status_code=503, detail="Compression service temporarily unavailable.")
+    return compressor
 
 
 # --- Define Model Selection Logic ---
@@ -416,6 +484,117 @@ async def stream_model_selection(
             log.error(f"Error during stream generation: {e}", exc_info=True)
             error_data = {"error": "An error occurred during processing.", "detail": str(e)}
             log.info("Yielding error event") # Log before yield
+            yield {
+                "event": "error",
+                "data": json.dumps(error_data)
+            }
+
+    return EventSourceResponse(event_generator())
+
+
+# --- Compression Endpoint --- NEW
+@app.post("/api/compress", response_model=CompressionResponse)
+async def compress_text(
+    request: CompressionRequest,
+    compressor: llmlingua.PromptCompressor = Depends(get_lingua_compressor)
+):
+    """Compresses the input text using LLMLingua."""
+    log.info(f"Received compression request. Target tokens: {request.target_token}")
+    try:
+        # Perform compression
+        result = await asyncio.to_thread(
+            compressor.compress_prompt,
+            request.text,
+            target_token=request.target_token,
+            # Add other parameters here if needed
+            # e.g., rate_limit=0.5, context_budget="+100", rank_method="longllmlingua"
+        )
+        
+        # Extract results (structure might vary slightly based on llmlingua version)
+        original_text = request.text
+        compressed_text = result.get("compressed_prompt", "")
+        original_tokens = result.get("origin_tokens", 0)
+        compressed_tokens = result.get("compressed_tokens", 0)
+        compression_ratio = original_tokens / compressed_tokens if compressed_tokens > 0 else 0
+        
+        log.info(f"Compression successful. Original tokens: {original_tokens}, Compressed: {compressed_tokens}")
+        
+        return CompressionResponse(
+            original_text=original_text,
+            compressed_text=compressed_text,
+            original_tokens=original_tokens,
+            compressed_tokens=compressed_tokens,
+            compression_ratio=compression_ratio
+        )
+
+    except Exception as e:
+        log.error(f"Error during text compression: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compress text: {str(e)}"
+        )
+
+
+# --- Direct Generation Streaming Endpoint --- NEW
+@app.post("/api/generate") # Response will be SSE
+async def stream_direct_generation(
+    request_data: GenerateRequest, # Receive data in body
+    request: Request, # Needed for EventSourceResponse
+    openrouter_client=Depends(get_openrouter_client),
+):
+    """Streams a completion directly from a specified OpenRouter model using SSE."""
+    prompt = request_data.prompt
+    model = request_data.model
+    temperature = request_data.temperature
+    top_p = request_data.top_p
+    max_tokens = request_data.max_tokens
+    
+    log.info(f"Initiating direct generation stream. Model: {model}, Prompt length: {len(prompt)}")
+    log.info(f"Params: Temp: {temperature}, Top-P: {top_p}, Max Tokens: {max_tokens}")
+
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            # 1. Stream Completion from specified OpenRouter model
+            log.info(f"Streaming from OpenRouter model: {model}")
+            stream = await openrouter_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=100, # change this
+                stream=True, # Enable streaming
+            )
+            log.info("Got stream object from OpenRouter. Starting iteration...")
+            
+            # 2. Yield Text Chunks
+            chunk_count = 0
+            async for chunk in stream:
+                chunk_count += 1
+                log.debug(f"Received chunk {chunk_count} from OpenRouter stream")
+                if await request.is_disconnected():
+                    log.warning("Client disconnected, stopping stream.")
+                    break
+                
+                content = chunk.choices[0].delta.content
+                log.info(f"[BACKEND GEN STREAM] Raw chunk content: {repr(content)}")
+                
+                if content: # Send non-empty chunks
+                    log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")
+                    yield {
+                        "event": "text_chunk",
+                        "data": content
+                    }
+            log.info(f"Finished iterating through OpenRouter stream after {chunk_count} chunks.")
+            
+            # 3. Send End Event
+            log.info("Yielding end_stream event")
+            yield {"event": "end_stream", "data": "Stream finished"}
+            log.info("Finished streaming and sent end event.")
+
+        except Exception as e:
+            log.error(f"Error during direct generation stream: {e}", exc_info=True)
+            error_data = {"error": "An error occurred during generation.", "detail": str(e)}
+            log.info("Yielding error event")
             yield {
                 "event": "error",
                 "data": json.dumps(error_data)

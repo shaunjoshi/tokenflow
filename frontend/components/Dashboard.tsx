@@ -4,6 +4,7 @@ import axios, {AxiosInstance} from 'axios';
 import {supabase} from '../clients/supabaseClient'; // Adjust path if needed
 import {Session} from '@supabase/supabase-js';
 import ModelSelectionChatView from './ModelSelectionChatView'; // Import model selection view
+import PromptCompressionView from './PromptCompressionView'; // --- NEW: Import Compression View ---
 import {
     AppBar,
     Box,
@@ -25,12 +26,13 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import InsightsIcon from '@mui/icons-material/Insights'; // Sentiment Icon
 import MenuIcon from '@mui/icons-material/Menu'; // For potential mobile drawer toggle
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // For Model Selection
+import CompressIcon from '@mui/icons-material/Compress'; // --- NEW: Icon for Compression ---
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const drawerWidth = 240; // Define drawer width
 
-// --- Define Feature Key Type ---
-type FeatureKey = 'sentiment' | 'ranker' | 'model-selector';
+// --- Define Feature Key Type --- Updated
+type FeatureKey = 'sentiment' | 'ranker' | 'model-selector' | 'prompt-compression';
 
 interface DashboardProps {
     session: Session;
@@ -82,17 +84,18 @@ function Dashboard({ session }: DashboardProps) {
         setIsClosing(false);
     };
 
-    // --- Get current feature title ---
+    // --- Get current feature title --- Updated
     const getCurrentFeatureTitle = () => {
         switch(selectedFeature) {
             case 'sentiment': return 'Sentiment Analysis';
             case 'ranker': return 'Product Ranker';
             case 'model-selector': return 'Model Selection Chat';
+            case 'prompt-compression': return 'Prompt Compression Demo'; // --- NEW Title ---
             default: return 'Dashboard';
         }
     };
 
-    // --- Drawer Content ---
+    // --- Drawer Content --- Updated
     const drawerContent = (
         <div>
             <Toolbar>
@@ -115,6 +118,18 @@ function Dashboard({ session }: DashboardProps) {
                             <AutoAwesomeIcon color={selectedFeature === 'model-selector' ? 'primary' : 'action'} />
                         </ListItemIcon>
                         <ListItemText primary="Model Selection Chat" />
+                    </ListItemButton>
+                </ListItem>
+                {/* --- NEW Compression Link --- */}
+                <ListItem disablePadding>
+                    <ListItemButton
+                        selected={selectedFeature === 'prompt-compression'}
+                        onClick={() => handleFeatureSelect('prompt-compression')}
+                    >
+                        <ListItemIcon>
+                            <CompressIcon color={selectedFeature === 'prompt-compression' ? 'primary' : 'action'} />
+                        </ListItemIcon>
+                        <ListItemText primary="Prompt Compression" />
                     </ListItemButton>
                 </ListItem>
                 {/* Add more features here */}
@@ -221,6 +236,12 @@ function Dashboard({ session }: DashboardProps) {
                 {/* Conditionally render the selected feature's view */}
                 {selectedFeature === 'model-selector' && (
                     <ModelSelectionChatView session={session} apiClient={apiClient} />
+                )}
+                {/* --- NEW View Rendering --- */}
+                {selectedFeature === 'prompt-compression' && (
+                    // We'll create this component next
+                    // <Typography>Prompt Compression View Placeholder</Typography> 
+                    <PromptCompressionView apiClient={apiClient} /> // --- UNCOMMENTED ---
                 )}
                 {/* Add more feature views here based on selectedFeature */}
             </Box>
