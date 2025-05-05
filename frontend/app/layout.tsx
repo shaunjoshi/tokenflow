@@ -1,43 +1,35 @@
-// src/app/page.tsx (Formerly App.tsx)
-"use client"; // <-- ADD THIS DIRECTIVE AT THE TOP
+// frontend/app/layout.tsx
+// THIS FILE MUST BE A SERVER COMPONENT (NO "use client")
 
-import React from 'react';
-import useSupabaseSession from '../components/AuthSession'; // Adjust path if needed
-import Auth from '../components/Auth'; // Adjust path if needed
-import Dashboard from '../components/Dashboard'; // Adjust path if needed
-import { Container, Box, CircularProgress, Typography, Link } from '@mui/material';
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import { CssBaseline } from '@mui/material';
+// import { ThemeProvider } from '@mui/material';
+// import theme from '../styles/theme'; // Adjust path and uncomment if you have a theme
+// import "./globals.css"; // Import global styles if you have them
 
-// The component definition remains largely the same, just named implicitly "Page" by Next.js
-export default function Page() {
-    const { session, loading } = useSupabaseSession();
+const inter = Inter({ subsets: ["latin"] });
 
-    if (loading) {
-        return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <CircularProgress />
-                <Typography sx={{ ml: 2 }}>Loading Session...</Typography>
-            </Box>
-        );
-    }
+// Metadata must be exported from a Server Component
+export const metadata: Metadata = {
+  title: "AI Tools Dashboard", // Customize your title
+  description: "Model Selection and Analysis Tools", // Customize description
+};
 
-    // The Container should likely be inside the return, not wrapping everything
-    // Let the RootLayout handle the main page structure potentially
-    return (
-        <Container component="main" maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-            {!session ? (
-                <Auth />
-            ) : (
-                <Dashboard key={session.user.id} session={session} />
-            )}
-            {/* Footer can stay or move to layout */}
-            <Box mt={5} mb={2} textAlign="center">
-                <Typography variant="body2" color="text.secondary">
-                    MVP - Built for demonstration. | Need help?{' '}
-                    <Link href="#" color="inherit">
-                        Contact Support
-                    </Link>
-                </Typography>
-            </Box>
-        </Container>
-    );
+// This is the Root Layout component
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      {/* <ThemeProvider theme={theme}> */}
+        <CssBaseline /> {/* MUI base styles */}        
+        <body className={inter.className}>
+          {children} {/* Your page.tsx content renders here */}
+        </body>
+      {/* </ThemeProvider> */}
+    </html>
+  );
 }
