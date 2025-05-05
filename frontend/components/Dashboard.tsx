@@ -24,8 +24,6 @@ import {
 import LogoutIcon from '@mui/icons-material/Logout';
 import InsightsIcon from '@mui/icons-material/Insights'; // Sentiment Icon
 import MenuIcon from '@mui/icons-material/Menu'; // For potential mobile drawer toggle
-import AnalyticsIcon from '@mui/icons-material/Analytics'; // Alternative Sentiment Icon
-import LeaderboardIcon from '@mui/icons-material/Leaderboard'; // Alternative Ranker Icon
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // For Model Selection
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -39,6 +37,9 @@ interface DashboardProps {
 }
 
 function Dashboard({ session }: DashboardProps) {
+    // Log that Dashboard function body is executing
+    console.log("--- Dashboard Component Render Start ---"); 
+
     const [selectedFeature, setSelectedFeature] = useState<FeatureKey>('model-selector'); // Default to model selector
     const [mobileOpen, setMobileOpen] = useState(false); // State for mobile drawer
     const [isClosing, setIsClosing] = useState(false); // Prevent flicker on mobile close
@@ -133,6 +134,9 @@ function Dashboard({ session }: DashboardProps) {
     );
 
     // --- Render ---
+    // Log the state right before rendering conditional views
+    console.log("Dashboard rendering feature:", selectedFeature);
+
     return (
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
             <CssBaseline /> {/* Ensures consistent baseline */}

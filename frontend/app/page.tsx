@@ -1,4 +1,4 @@
-// src/app/page.tsx
+// src/app/page.tsx (Formerly layout.tsx)
 "use client"; // REQUIRED: Keep this directive at the very top
 
 import React from 'react';
@@ -6,10 +6,10 @@ import React from 'react';
 import useSupabaseSession from '../components/AuthSession'; // Assuming it's in src/hooks/
 import Auth from '../components/Auth';                      // Assuming it's in src/components/
 import Dashboard from '../components/Dashboard';            // Assuming it's in src/components/
-import { Container, Box, CircularProgress, Typography } from '@mui/material';
+import { Container, Box, CircularProgress, Typography, Link } from '@mui/material';
 
 // This component defines the content specifically for the "/" route
-export default function HomePage() { // Renamed to HomePage for clarity (optional)
+export default function Page() {
     const { session, loading } = useSupabaseSession();
 
     // --- Loading State ---
@@ -17,7 +17,7 @@ export default function HomePage() { // Renamed to HomePage for clarity (optiona
     if (loading) {
         return (
             // Center loading indicator vertically and horizontally
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 150px)' }}> {/* Adjust minHeight based on header/footer */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
                 <CircularProgress />
                 <Typography sx={{ ml: 2 }}>Loading Session...</Typography>
             </Box>
@@ -38,22 +38,20 @@ export default function HomePage() { // Renamed to HomePage for clarity (optiona
                 <Dashboard key={session.user.id} session={session} />
             )}
 
-            {/*
-             * Footer Placement Consideration:
+            {/* Footer Placement Consideration:
              * This footer is currently specific to the HomePage.
              * If you want this footer on ALL pages, it's better to move
              * the <Box mt={5}...>...</Box> block into your app/layout.tsx
              * file, typically rendered after {children}.
-             * Keeping it here is fine if it's ONLY for the home page.
-             */}
-            {/* <Box mt={5} mb={2} textAlign="center">
+             * Keeping it here is fine if it's ONLY for the home page. */}
+            <Box mt={5} mb={2} textAlign="center">
                 <Typography variant="body2" color="text.secondary">
                     MVP - Built for demonstration. | Need help?{' '}
                     <Link href="#" color="inherit">
                         Contact Support
                     </Link>
                 </Typography>
-            </Box> */}
+            </Box>
         </Container>
     );
 }

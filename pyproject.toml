@@ -43,6 +43,7 @@ dependencies = [
     "protobuf>=4.23.0,<5.0.0",        # Protocol buffers for transformers
     "accelerate>=0.21.0,<0.30.0",     # Optional acceleration for transformers
     "python-dotenv>=1.0.0,<2.0.0",    # For loading .env files
+    "sse-starlette>=1.8.0,<2.0.0"     # For Server-Sent Events
 ]
 
 [project.urls] # Optional: Links for users

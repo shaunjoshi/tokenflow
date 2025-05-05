@@ -2,11 +2,14 @@
 import contextlib
 import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union  # Import List for type hinting
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator  # Added AsyncGenerator
+import asyncio # Added asyncio for sleep
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends
+import json # Added json
+from fastapi import FastAPI, HTTPException, Depends, Request # Added Request
 from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse # Added for SSE
 # --- Text Splitter ---
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import AsyncOpenAI
@@ -290,88 +293,123 @@ async def select_model_for_category(category: str) -> str:
     Returns the model ID to be used with OpenRouter.
     """
     model_mapping = {
-        "creative": "anthropic/claude-3-opus:beta",  # Best for creative tasks
-        "factual": "microsoft/phi-4-reasoning-plus:free",  # Good for fact-based tasks
-        "coding": "openai/gpt-4-turbo",  # Strong for coding
+        "creative": "anthropic/claude-3-sonnet:beta",#"anthropic/claude-3-opus:beta",  # Best for creative tasks
+        "factual": "anthropic/claude-3-sonnet:beta",  # Good for fact-based tasks
+        "coding":   "anthropic/claude-3-sonnet:beta", # "openai/gpt-4-turbo",  # Strong for coding
         "math": "anthropic/claude-3-opus:beta",  # Good for mathematical reasoning
-        "reasoning": "anthropic/claude-3-sonnet:beta",  # Good for general reasoning
+        "reasoning":  "anthropic/claude-3-sonnet:beta", #"anthropic/claude-3-sonnet:beta",  # Good for general reasoning
         # Default fallback
-        "default": "mistralai/mistral-7b"
+        "default": "mistralai/mistral-7b-instruct"
     }
     
     return model_mapping.get(category.lower(), model_mapping["default"])
 
 
-# --- Model Selection Endpoint ---
-@app.post("/api/models/select", response_model=ModelSelectionResponse)
-async def select_model(
-    request: ModelSelectionRequest,
-    bart_classifier = Depends(get_bart_classifier),
-    openrouter_client = Depends(get_openrouter_client)
+# --- Model Selection Streaming Endpoint --- 
+@app.post("/api/models/select") # Keep POST, but response will be SSE
+async def stream_model_selection(
+    request_data: ModelSelectionRequest, # Receive data in body
+    request: Request, # Needed for EventSourceResponse
+    bart_classifier=Depends(get_bart_classifier),
+    openrouter_client=Depends(get_openrouter_client),
 ):
     """
-    Classifies a prompt using Facebook BART and selects the appropriate model from OpenRouter.ai.
-    Then processes the prompt with the selected model and returns the result.
+    Classifies prompt, selects model, then streams the completion using SSE.
+    Sends metadata first, then text chunks.
     """
-    prompt = request.prompt
-    categories = request.possible_categories
+    prompt = request_data.prompt
+    categories = request_data.possible_categories
+    temperature = request_data.temperature
+    top_p = request_data.top_p
     
-    log.info(f"Processing model selection request with prompt length: {len(prompt)}")
-    log.info(f"Categories to classify against: {categories}")
-    
-    try:
-        # Use BART to classify prompt
-        log.info("Classifying prompt with BART...")
-        classification_result = bart_classifier(
-            prompt, 
-            categories,
-            multi_label=False  # We want a single category
-        )
+    log.info(f"Initiating streaming request for prompt length: {len(prompt)}")
+    log.info(f"Categories: {categories}, Temp: {temperature}, Top-P: {top_p}")
+
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+        # Send an immediate ping event to test connection
+        # try:
+        #     log.info("Sending initial ping event")
+        #     yield {"event": "ping", "data": datetime.now().isoformat()}
+        #     log.info("Initial ping event sent")
+        # except Exception as ping_err:
+        #     log.error(f"Error sending initial ping: {ping_err}")
         
-        # Extract classification results
-        top_category = classification_result["labels"][0]
-        top_score = classification_result["scores"][0]
-        
-        log.info(f"Prompt classified as '{top_category}' with confidence {top_score:.2f}")
-        
-        # Convert all classification results to dictionary
-        all_categories = {
-            label: score 
-            for label, score in zip(classification_result["labels"], classification_result["scores"])
-        }
-        
-        # Select the appropriate model based on the classification
-        selected_model = await select_model_for_category(top_category)
-        log.info(f"Selected model: {selected_model} for category: {top_category}")
-        
-        # Process the prompt with the selected model
-        log.info(f"Sending prompt to OpenRouter with model: {selected_model}")
-        completion_response = await openrouter_client.chat.completions.create(
-            model=selected_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=request.temperature,
-            top_p=request.top_p,
-        )
-        
-        # Extract the completion text
-        completion_text = completion_response.choices[0].message.content
-        log.info(f"Received completion from OpenRouter, length: {len(completion_text)} characters")
-        
-        # Return the results
-        return ModelSelectionResponse(
-            selected_model=selected_model,
-            prompt_category=top_category,
-            confidence_score=top_score,
-            all_categories=all_categories,
-            completion=completion_text
-        )
-        
-    except Exception as e:
-        log.error(f"Error in model selection endpoint: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to process request: {str(e)}"
-        )
+        try:
+            # 1. Classify Prompt
+            log.info("Classifying prompt with BART...")
+            classification_result = bart_classifier(
+                prompt, categories, multi_label=False
+            )
+            top_category = classification_result["labels"][0]
+            top_score = classification_result["scores"][0]
+            all_categories = {
+                label: score 
+                for label, score in zip(classification_result["labels"], classification_result["scores"])
+            }
+            log.info(f"Classified as '{top_category}' ({top_score:.2f})")
+
+            # 2. Select Model
+            selected_model = await select_model_for_category(top_category)
+            log.info(f"Selected model: {selected_model}")
+
+            # 3. Send Metadata Event
+            metadata = {
+                "prompt_category": top_category,
+                "confidence_score": top_score,
+                "selected_model": selected_model,
+                "all_categories": all_categories,
+            }
+            log.info("Yielding metadata event") # Log before yield
+            yield {
+                "event": "metadata",
+                "data": json.dumps(metadata) 
+            }
+            log.info("Sent metadata event")
+
+            # 4. Stream Completion from OpenRouter
+            log.info(f"Streaming from OpenRouter model: {selected_model}")
+            stream = await openrouter_client.chat.completions.create(
+                model=selected_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=250,
+                stream=True, # Enable streaming
+            )
+            log.info("Got stream object from OpenRouter. Starting iteration...") # Log after create
+            
+            # 5. Yield Text Chunks
+            chunk_count = 0
+            async for chunk in stream:
+                chunk_count += 1
+                log.debug(f"Received chunk {chunk_count} from OpenRouter stream") # More verbose debug log
+                if await request.is_disconnected():
+                    log.warning("Client disconnected, stopping stream.")
+                    break
+                content = chunk.choices[0].delta.content
+                if content:
+                    log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")  # Log before yield
+                    yield {
+                        "event": "text_chunk",
+                        "data": content
+                    }
+            log.info(f"Finished iterating through OpenRouter stream after {chunk_count} chunks.")
+            
+            # 6. Send End Event
+            log.info("Yielding end_stream event") # Log before yield
+            yield {"event": "end_stream", "data": "Stream finished"}
+            log.info("Finished streaming and sent end event.")
+
+        except Exception as e:
+            log.error(f"Error during stream generation: {e}", exc_info=True)
+            error_data = {"error": "An error occurred during processing.", "detail": str(e)}
+            log.info("Yielding error event") # Log before yield
+            yield {
+                "event": "error",
+                "data": json.dumps(error_data)
+            }
+
+    return EventSourceResponse(event_generator())
 
 
 # --- Classification-Only Endpoint ---
