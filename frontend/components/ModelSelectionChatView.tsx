@@ -16,8 +16,10 @@ import {
   InputAdornment,
   Stack,
   Alert,
-  useTheme
+  useTheme,
+  PaperTypeMap
 } from '@mui/material';
+import { ElementType } from 'react';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ReactMarkdown from 'react-markdown';
@@ -58,6 +60,49 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   const currentAssistantText = useRef<string>('');
   const assistantMessageId = useRef<string | null>(null);
   const theme = useTheme();
+
+  // Function to post-process text with common spacing fixes
+  const cleanStreamedText = (text: string): string => {
+    // --- ADDED LOG: Check if function is called and with what text ---
+    console.log("!!! cleanStreamedText CALLED !!! Received text length:", text?.length);
+    // --- END ADDED LOG ---
+
+    if (!text) return text;
+
+    console.log("Starting text cleaning process - Original:", text.substring(0, 100) + "...");
+
+    let cleaned = text;
+
+    // --- Step 1: Normalize all whitespace (including newlines) to a single space --- 
+    // This might merge paragraphs, but ensures single spaces everywhere else first.
+    cleaned = cleaned.replace(/\s+/g, ' ');
+    console.log("After initial whitespace normalization:", cleaned.substring(0, 100) + "...");
+
+    // --- Step 2: Re-introduce paragraph breaks (simple heuristic: look for period-space-uppercase) ---
+    // This is an attempt to restore paragraphs potentially lost in step 1.
+    cleaned = cleaned.replace(/([.!?])\s+([A-Z])/g, '$1\n\n$2');
+    console.log("After paragraph break attempt:", cleaned.substring(0, 100) + "...");
+
+    // --- Step 3: Fix common list formatting ---
+    // Try to restore list items that might have lost their newline.
+    cleaned = cleaned.replace(/ - /g, '\n- '); // Heuristic: space-dash-space likely was a list item
+    console.log("After list fix attempt:", cleaned.substring(0, 100) + "...");
+
+
+    // --- Step 4: Refined Punctuation spacing ---
+    // Remove space *before* common punctuation.
+    cleaned = cleaned.replace(/\s+([.,!?;:])/g, '$1');
+    // Ensure single space *after* common punctuation, unless followed by another punctuation or end of line/string.
+    cleaned = cleaned.replace(/([.,!?;:])\s*([a-zA-Z0-9])/g, '$1 $2'); 
+    console.log("After punctuation fix:", cleaned.substring(0, 100) + "...");
+
+    // Final trim
+    cleaned = cleaned.trim();
+
+    console.log("Cleaned text applied - Before/After length:", text.length, cleaned.length);
+    console.log("Cleaned text sample:", cleaned.substring(0, 100) + "...");
+    return cleaned;
+  };
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -139,33 +184,57 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
       // Log the raw data received
       console.log(`[text_chunk] Raw data received for ${currentId}: "${data}"`);
 
+      // --- Update state immediately --- 
       setMessages(prev => {
-         // Add detailed logging inside the state updater
-         console.log(`[text_chunk] setMessages called. Prev state length: ${prev.length}`);
-         const targetMsgExists = prev.some(m => m.id === currentId);
-         console.log(`[text_chunk] Target message ${currentId} exists in prev state: ${targetMsgExists}`);
-         
-         const nextMessages = prev.map(msg => {
-            if (msg.id === currentId) { // Use the captured currentId
-              const oldText = msg.text || ''; 
-              // Revert to simple concatenation - ReactMarkdown will handle space collapsing and newlines.
-              const newText = oldText + data; 
-              console.log(`[text_chunk] Updating msg ${currentId}. Old text length: ${oldText.length}, Raw data: "${data}", New text length: ${newText.length}`);
-              return { ...msg, text: newText };
-            } else {
-              return msg;
-            }
-         });
-         console.log(`[text_chunk] setMessages returning next state. Length: ${nextMessages.length}`);
-         return nextMessages;
+        console.log(`[text_chunk] Immediate update. Prev state length: ${prev.length}`);
+        return prev.map(msg => {
+          if (msg.id === currentId) { 
+            const oldText = msg.text || ''; 
+            const newText = mergeChunks(oldText, data); 
+            console.log(`[text_chunk] Updating msg ${currentId}. Old text length: ${oldText.length}, Raw data: "${data}", New text length: ${newText.length}`);
+            return { ...msg, text: newText };
+          } else {
+            return msg;
+          }
+        });
       });
+      // --- End Immediate Update ---
+
     } else if (eventType === 'end_stream') {
+      // --- ADDED LOG: Check if end_stream block is entered ---
+      console.log("!!! end_stream event received !!!");
+      // --- END ADDED LOG ---
+
       console.info(`[${eventType}] Processed end_stream.`);
-      if (currentId) { // Only clear if we had an ID
+
+      // --- ADDED LOG: Log the value of assistantMessageId.current ---
+      console.log(`[${eventType}] Value of assistantMessageId.current is:`, assistantMessageId.current);
+      // --- END ADDED LOG ---
+
+      if (assistantMessageId.current) { // Only clear if we had an ID
+          // --- CAPTURE ID before setMessages call ---
+          const idToClean = assistantMessageId.current;
+          // --- END CAPTURE ---
+
+          // --- ADDED LOG: Confirm cleanup is being attempted ---
+          console.log(`[${eventType}] assistantMessageId (${idToClean}) is valid. Calling setMessages with cleanStreamedText...`);
+          // --- END ADDED LOG ---
+          setMessages(prev => 
+            prev.map(msg => 
+              // --- USE CAPTURED ID for comparison ---
+              msg.id === idToClean 
+              // --- END USE CAPTURED ID ---
+                ? { ...msg, text: cleanStreamedText(msg.text || '') }
+                : msg
+            )
+          );
+          
           assistantMessageId.current = null;
           console.log(`[${eventType}] Cleared assistantMessageId.`);
       } else {
-          console.log(`[${eventType}] No assistantMessageId to clear.`);
+          // --- ADDED LOG: Confirm cleanup is skipped due to null ID ---
+          console.warn(`[${eventType}] assistantMessageId.current is null or invalid. Cleanup skipped!`);
+          // --- END ADDED LOG ---
       }
       setIsLoading(false);
     } else if (eventType === 'error') {
@@ -410,6 +479,12 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
     return colorMap[category.toLowerCase()] || '#757575'; // Grey default
   };
 
+  function mergeChunks(prev, next) {
+    // Simply concatenate the previous text and the new chunk.
+    // The final cleanStreamedText function will handle normalization of spaces.
+    return (prev || '') + (next || '');
+  }
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Typography variant="h6" gutterBottom>
@@ -503,14 +578,13 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                           ol: ({node, ...props}) => <ol style={{ marginTop: theme.spacing(1), marginBottom: theme.spacing(1), paddingLeft: theme.spacing(3) }} {...props} />,
                           li: ({node, ...props}) => (
                             <li style={{ marginBottom: theme.spacing(0.5) }}>
-                              {/* Render children (text content) within Typography */} 
+                              {/* Render children (text content) within Typography */}
                               <Typography variant="body1" component="span" {...props} />
                             </li>
-                          ),
-                          // Add other components as needed (e.g., h1, h2, code, blockquote)
+                          )
                         }}
                       >
-                        {message.text} 
+                        {message.text}
                       </ReactMarkdown>
                     )}
                     
@@ -520,10 +594,10 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                         <Box sx={{ mt: 1 }}>
                           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                             {message.modelInfo?.prompt_category && (
-                              <Chip 
+                              <Chip
                                 label={`Category: ${message.modelInfo.prompt_category}`}
                                 size="small"
-                                sx={{ 
+                                sx={{
                                   bgcolor: getCategoryColor(message.modelInfo.prompt_category),
                                   color: '#fff',
                                   fontWeight: 'bold'
@@ -532,7 +606,7 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                             )}
                             
                             {message.modelInfo?.selected_model && (
-                              <Chip 
+                              <Chip
                                 label={`Model: ${formatModelName(message.modelInfo.selected_model)}`}
                                 size="small"
                                 color="primary"
@@ -541,7 +615,7 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                             )}
                             
                             {message.modelInfo?.confidence_score && (
-                              <Chip 
+                              <Chip
                                 label={`Confidence: ${(message.modelInfo.confidence_score * 100).toFixed(0)}%`}
                                 size="small"
                                 color="secondary"
@@ -564,14 +638,13 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                                       label={`${category}: ${(score * 100).toFixed(0)}%`}
                                       size="small"
                                       variant="outlined"
-                                      sx={{ 
+                                      sx={{
                                         fontSize: '0.7rem',
                                         height: 24,
                                         opacity: score > 0.1 ? 1 : 0.7
                                       }}
                                     />
-                                  ))
-                                }
+                                  ))}
                               </Box>
                             </>
                           )}
@@ -608,9 +681,9 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">
-                <IconButton 
-                  type="submit" 
-                  color="primary" 
+                <IconButton
+                  type="submit"
+                  color="primary"
                   disabled={isLoading || !inputText.trim()}
                   edge="end"
                 >
@@ -625,4 +698,4 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   );
 };
 
-export default ModelSelectionChatView; 
+export default ModelSelectionChatView;
