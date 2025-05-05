@@ -387,7 +387,21 @@ async def stream_model_selection(
                     log.warning("Client disconnected, stopping stream.")
                     break
                 content = chunk.choices[0].delta.content
+                
+                # --- ADD LOGGING HERE ---
+                # Log raw content *before* potential trimming
+                log.info(f"[BACKEND STREAM] Raw chunk content: {repr(content)}") 
+                # --- END LOGGING ---
+
+                # --- TRIM WHITESPACE --- 
+                # Trim leading/trailing whitespace from the chunk if content is not None
                 if content:
+                    content = content.strip()
+                    # Log after trimming if needed for debugging
+                    # log.info(f"[BACKEND STREAM] Trimmed chunk content: {repr(content)}") 
+                # --- END TRIM ---
+
+                if content: # Check content again after trimming (it might become empty)
                     log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")  # Log before yield
                     yield {
                         "event": "text_chunk",

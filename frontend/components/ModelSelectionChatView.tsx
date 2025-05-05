@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ReactMarkdown from 'react-markdown';
 
 // Define API Base URL (ensure it's available, e.g., from process.env)
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'; // Provide a fallback
@@ -135,6 +136,9 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
       }
     } else if (currentId && eventType === 'text_chunk') { // Check currentId exists for text_chunk
       
+      // Log the raw data received
+      console.log(`[text_chunk] Raw data received for ${currentId}: "${data}"`);
+
       setMessages(prev => {
          // Add detailed logging inside the state updater
          console.log(`[text_chunk] setMessages called. Prev state length: ${prev.length}`);
@@ -143,10 +147,10 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
          
          const nextMessages = prev.map(msg => {
             if (msg.id === currentId) { // Use the captured currentId
-              // REMOVED placeholder check, just append to current text or empty string
               const oldText = msg.text || ''; 
+              // Revert to simple concatenation - ReactMarkdown will handle space collapsing and newlines.
               const newText = oldText + data; 
-              console.log(`[text_chunk] Updating msg ${currentId}. Old text was: "${msg.text}", New text: "${newText.substring(0,100)}..."`);
+              console.log(`[text_chunk] Updating msg ${currentId}. Old text length: ${oldText.length}, Raw data: "${data}", New text length: ${newText.length}`);
               return { ...msg, text: newText };
             } else {
               return msg;
@@ -454,6 +458,10 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
           messages.map((message) => {
             // Log the specific modelInfo being rendered
             console.log('Rendering message:', message.id, 'modelInfo:', message.modelInfo);
+            // Log the final text being passed to ReactMarkdown for assistant messages
+            if (message.sender === 'assistant') {
+              console.log(`[ReactMarkdown Input] Final text for ${message.id}:`, JSON.stringify(message.text));
+            }
             return (
               <Box 
                 key={message.id} 
@@ -474,17 +482,37 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                   }}
                 >
                   <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                    <Typography 
-                      variant="body1" 
-                      sx={{ 
-                        color: message.sender === 'user' 
-                          ? theme.palette.primary.contrastText
-                          : theme.palette.text.primary,
-                        whiteSpace: 'pre-wrap'
-                      }}
-                    >
-                      {message.text}
-                    </Typography>
+                    {message.sender === 'user' ? (
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          color: theme.palette.primary.contrastText,
+                          whiteSpace: 'pre-wrap' // Keep pre-wrap for user messages
+                        }}
+                      >
+                        {message.text}
+                      </Typography>
+                    ) : (
+                      // Use ReactMarkdown for assistant messages (simplified)
+                      <ReactMarkdown
+                        components={{
+                          // Use MUI Typography for paragraphs for consistent styling
+                          p: ({node, ...props}) => <Typography variant="body1" paragraph {...props} />,
+                          // Style list items for better spacing
+                          ul: ({node, ...props}) => <ul style={{ marginTop: theme.spacing(1), marginBottom: theme.spacing(1), paddingLeft: theme.spacing(3) }} {...props} />,
+                          ol: ({node, ...props}) => <ol style={{ marginTop: theme.spacing(1), marginBottom: theme.spacing(1), paddingLeft: theme.spacing(3) }} {...props} />,
+                          li: ({node, ...props}) => (
+                            <li style={{ marginBottom: theme.spacing(0.5) }}>
+                              {/* Render children (text content) within Typography */} 
+                              <Typography variant="body1" component="span" {...props} />
+                            </li>
+                          ),
+                          // Add other components as needed (e.g., h1, h2, code, blockquote)
+                        }}
+                      >
+                        {message.text} 
+                      </ReactMarkdown>
+                    )}
                     
                     {message.sender === 'assistant' && message.modelInfo && (
                       <>
