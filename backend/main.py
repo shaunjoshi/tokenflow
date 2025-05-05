@@ -297,7 +297,7 @@ async def select_model_for_category(category: str) -> str:
         "factual": "anthropic/claude-3-sonnet:beta",  # Good for fact-based tasks
         "coding":   "anthropic/claude-3-sonnet:beta", # "openai/gpt-4-turbo",  # Strong for coding
         "math": "anthropic/claude-3-opus:beta",  # Good for mathematical reasoning
-        "reasoning":  "anthropic/claude-3-sonnet:beta", #"anthropic/claude-3-sonnet:beta",  # Good for general reasoning
+        "reasoning":  "openai/gpt-4-turbo", #"anthropic/claude-3-sonnet:beta",  # Good for general reasoning
         # Default fallback
         "default": "mistralai/mistral-7b-instruct"
     }
@@ -393,15 +393,13 @@ async def stream_model_selection(
                 log.info(f"[BACKEND STREAM] Raw chunk content: {repr(content)}") 
                 # --- END LOGGING ---
 
-                # --- TRIM WHITESPACE --- 
-                # Trim leading/trailing whitespace from the chunk if content is not None
-                if content:
-                    content = content.strip()
-                    # Log after trimming if needed for debugging
-                    # log.info(f"[BACKEND STREAM] Trimmed chunk content: {repr(content)}") 
-                # --- END TRIM ---
+                # --- REMOVED TRIM WHITESPACE --- 
+                # if content:
+                #     content = content.strip()
+                #     log.info(f"[BACKEND STREAM] Trimmed chunk content: {repr(content)}") # Log the content AFTER trimming
+                # --- END REMOVED TRIM ---
 
-                if content: # Check content again after trimming (it might become empty)
+                if content: # Check content again (it might be None)
                     log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")  # Log before yield
                     yield {
                         "event": "text_chunk",
