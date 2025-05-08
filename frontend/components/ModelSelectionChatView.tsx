@@ -18,6 +18,8 @@ import {
   Alert,
   useTheme,
   PaperTypeMap,
+  Link,
+  alpha,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -333,22 +335,49 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                         <ReactMarkdown
                           components={{
                             p: ({node, ...props}) => <Typography variant="body2" paragraph sx={{mb:1, whiteSpace: 'pre-wrap'}} {...props} />,
-                            ul: ({node, ...props}) => <Box component="ul" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
-                            ol: ({node, ...props}) => <Box component="ol" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
-                            li: ({node, children, ...props}) => (
-                              <li style={{ marginBottom: '4px' }}>
-                                <Typography variant="body2" component="span" sx={{ display: 'inline', '& > p': { display: 'inline' } }} {...props}>
-                                  {children}
-                                </Typography>
-                              </li>
-                            ),
+                            h1: ({node, ...props}) => <Typography variant="h1" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            h2: ({node, ...props}) => <Typography variant="h2" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            h3: ({node, ...props}) => <Typography variant="h3" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            h4: ({node, ...props}) => <Typography variant="h4" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            h5: ({node, ...props}) => <Typography variant="h5" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            h6: ({node, ...props}) => <Typography variant="h6" gutterBottom sx={{ whiteSpace: 'pre-wrap' }} {...props} />,
+                            ul: ({node, ...props}) => <Box component="ul" sx={{ pl: 2, mt: 1, mb: 1 }} {...props} />,
+                            ol: ({node, ...props}) => <Box component="ol" sx={{ pl: 2, mt: 1, mb: 1 }} {...props} />,
+                            li: ({node, children, ...props}) => {
+                              const { ref, ...restProps } = props as any;
+                              return (
+                                <Box component="li" sx={{ mb: 0.5, '& > p': { mb: 0.5 } }} {...restProps}>
+                                  <Typography variant="body2" component="div">
+                                    {children}
+                                  </Typography>
+                                </Box>
+                              );
+                            },
                             code: ({node, children, className, ...props}: any) => {
                               const match = /language-(\w+)/.exec(className || '');
                               const isInline = !match && !className;
                               return isInline 
-                                ? <Typography component="code" variant="body2" sx={{ fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', px: 0.5, borderRadius: 0.5 }} {...props}>{children}</Typography>
-                                : <Box component="pre" sx={{ fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', p: 1, borderRadius: 1, overflowX: 'auto' }} {...props}>{children}</Box>;
+                                ? <Typography component="code" variant="body2" sx={{ fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', px: 0.5, borderRadius: 1, fontSize: '0.875rem' }} {...props}>{children}</Typography>
+                                : <Box component="pre" sx={{ fontFamily: 'monospace', bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[100], p: 1.5, borderRadius: 1, overflowX: 'auto', fontSize: '0.875rem', my: 1 }} {...props}>{children}</Box>;
                             },
+                            blockquote: ({node, ...props}) => (
+                              <Box
+                                component="blockquote"
+                                sx={{
+                                  pl: 2,
+                                  ml: 0,
+                                  mr: 0,
+                                  my: 1.5,
+                                  borderLeft: `4px solid ${theme.palette.grey[300]}`,
+                                  bgcolor: alpha(theme.palette.primary.light, 0.05),
+                                  '& > p': { mb: 0 },
+                                  whiteSpace: 'pre-wrap'
+                                }}
+                                {...props}
+                              />
+                            ),
+                            hr: ({node, ...props}) => <Divider sx={{ my: 2 }} {...props} />,
+                            a: ({node, ...props}) => <Link {...props} target="_blank" rel="noopener noreferrer" />,
                           }}
                         >
                           {message.text}

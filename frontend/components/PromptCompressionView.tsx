@@ -258,7 +258,7 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
             processSseBlock(eventBlock, setOutput, (text) => accumulatedText += text, setError);
             
             // Yield slightly to allow UI updates if many blocks arrive quickly
-            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 10));
         }
       }
 
