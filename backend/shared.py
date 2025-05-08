@@ -33,23 +33,34 @@ except NameError:
 # --- Settings Model ---
 # Define all required environment variables here
 class Settings(BaseSettings):
-    # Supabase Config
-    SUPABASE_URL: str = Field(..., validation_alias='SUPABASE_URL')
-    SUPABASE_SERVICE_ROLE_KEY: SecretStr = Field(..., validation_alias='SUPABASE_SERVICE_ROLE_KEY')
-    SUPABASE_JWT_SECRET: SecretStr = Field(..., validation_alias='SUPABASE_JWT_SECRET')
+    """Application settings loaded from environment variables."""
+    VERSION: str = "0.1.0"
+    APP_NAME: str = "model-selection-backend"
+    
+    # JWT
+    SUPABASE_JWT_SECRET: SecretStr = Field(..., env="SUPABASE_JWT_SECRET")
+    JWT_ALGORITHM: str = "HS256"
+    
+    # Database (Supabase)
+    SUPABASE_URL: str = Field(..., env="SUPABASE_URL") 
+    SUPABASE_SERVICE_ROLE_KEY: SecretStr = Field(..., env="SUPABASE_SERVICE_ROLE_KEY")
+    
+    # OpenRouter
+    OPENROUTER_API_KEY: SecretStr = Field(..., env="OPENROUTER_API_KEY")
+    OPENROUTER_API_BASE_URL: str = "https://openrouter.ai/api/v1"
+    
+    # Groq
+    GROQ_API_KEY: SecretStr = Field(..., env="GROQ_API_KEY") 
+    GROQ_API_BASE_URL: str = "https://api.groq.com/openai/v1"
+    
+    # Authentication
+    JWT_EXPIRATION_TIME_MINUTES: int = 60 * 24 * 5  # 5 days
 
     # Llama/Lambda Config
     LAMBDA_API_KEY: SecretStr = Field(..., validation_alias='LAMBDA_API_KEY')
     LAMBDA_API_BASE_URL: str = Field(..., validation_alias='LAMBDA_API_BASE_URL')
     LLAMA_MODEL_NAME: str = Field(default="llama3.1-70b-instruct-fp8", validation_alias='LLAMA_MODEL_NAME') # Example default
 
-    # OpenRouter Config
-    OPENROUTER_API_KEY: SecretStr = Field(..., validation_alias='OPENROUTER_API_KEY')
-    OPENROUTER_API_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", validation_alias='OPENROUTER_API_BASE_URL')
-    
-    # Other Config (Add as needed)
-    ALGORITHM: str = "HS256"
-    # CHROMA_BASE_PATH: str = "./chroma_dbs" # Uncomment if /upload endpoint is used
 
     # Tell Pydantic to load from .env file IN THE PROJECT ROOT
     model_config = SettingsConfigDict(
@@ -129,7 +140,7 @@ async def get_current_user(
         payload = jwt.decode(
             token,
             jwt_secret, # Access secret value
-            algorithms=[settings.ALGORITHM],
+            algorithms=[settings.JWT_ALGORITHM],
             audience="authenticated" # Standard Supabase audience
         )
         user_id: str | None = payload.get("sub")

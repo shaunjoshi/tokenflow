@@ -4,12 +4,18 @@ import axios, {AxiosInstance} from 'axios';
 import {supabase} from '../clients/supabaseClient'; // Adjust path if needed
 import {Session} from '@supabase/supabase-js';
 import ModelSelectionChatView from './ModelSelectionChatView'; // Import model selection view
+<<<<<<< Updated upstream
+=======
+import PromptCompressionView from './PromptCompressionView'; // --- NEW: Import Compression View ---
+import ModelCategoryRankings from './ModelCategoryRankings'; // Import Model Category Rankings component
+>>>>>>> Stashed changes
 import {
     AppBar,
     Box,
     CssBaseline,
     Divider,
     Drawer,
+    Grid,
     IconButton,
     List,
     ListItem,
@@ -86,7 +92,12 @@ function Dashboard({ session }: DashboardProps) {
         switch(selectedFeature) {
             case 'sentiment': return 'Sentiment Analysis';
             case 'ranker': return 'Product Ranker';
+<<<<<<< Updated upstream
             case 'model-selector': return 'Model Selection Chat';
+=======
+            case 'model-selector': return 'Intelligent Model Selection Chat';
+            case 'prompt-compression': return 'Prompt Compression Demo'; // --- NEW Title ---
+>>>>>>> Stashed changes
             default: return 'Dashboard';
         }
     };
@@ -113,7 +124,7 @@ function Dashboard({ session }: DashboardProps) {
                         <ListItemIcon>
                             <AutoAwesomeIcon color={selectedFeature === 'model-selector' ? 'primary' : 'action'} />
                         </ListItemIcon>
-                        <ListItemText primary="Model Selection Chat" />
+                        <ListItemText primary="Intelligent Model Selection Chat" />
                     </ListItemButton>
                 </ListItem>
                 {/* Add more features here */}
@@ -215,9 +226,36 @@ function Dashboard({ session }: DashboardProps) {
                 }}
             >
                 {/* Conditionally render the selected feature's view */}
+<<<<<<< Updated upstream
                 {selectedFeature === 'model-selector' && (
                     <ModelSelectionChatView session={session} apiClient={apiClient} />
                 )}
+=======
+                {selectedFeature === 'model-selector' ? (
+                    <Box sx={{ display: 'flex', height: 'calc(100vh - 100px)' }}>
+                        {/* Left side: Chat Interface (takes most of the space) */}
+                        <Box sx={{ flexGrow: 1, mr: { xs: 0, md: 2 }, width: { xs: '100%', md: 'calc(100% - 300px)' } }}>
+                            <ModelSelectionChatView session={session} apiClient={apiClient} />
+                        </Box>
+                        
+                        {/* Right side: Model Category Rankings (fixed width) */}
+                        <Box 
+                            sx={{ 
+                                width: '300px', 
+                                display: { xs: 'none', md: 'block' },
+                                position: 'sticky',
+                                top: '80px', // Account for AppBar
+                                alignSelf: 'flex-start',
+                                maxHeight: 'calc(100vh - 100px)'
+                            }}
+                        >
+                            <ModelCategoryRankings initialExpanded={true} />
+                        </Box>
+                    </Box>
+                ) : selectedFeature === 'prompt-compression' ? (
+                    <PromptCompressionView apiClient={apiClient} />
+                ) : null}
+>>>>>>> Stashed changes
                 {/* Add more feature views here based on selectedFeature */}
             </Box>
         </Box>

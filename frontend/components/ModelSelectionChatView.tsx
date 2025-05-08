@@ -16,10 +16,22 @@ import {
   InputAdornment,
   Stack,
   Alert,
+<<<<<<< Updated upstream
   useTheme
+=======
+  useTheme,
+  PaperTypeMap,
+>>>>>>> Stashed changes
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+<<<<<<< Updated upstream
+=======
+import ReactMarkdown from 'react-markdown';
+
+// Define API Base URL (ensure it's available, e.g., from process.env)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000'; // Remove trailing slash if present
+>>>>>>> Stashed changes
 
 interface ModelSelectionChatViewProps {
   session: Session;
@@ -44,7 +56,7 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [categories] = useState(['creative', 'factual', 'coding', 'math', 'reasoning']);
+  const [categories] = useState(['reasoning', 'function-calling', 'text-to-text', 'multilingual', 'safety']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const theme = useTheme();
 
@@ -82,7 +94,24 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
         prompt: inputText,
         possible_categories: categories,
         temperature: 0.7,
+<<<<<<< Updated upstream
         top_p: 0.9
+=======
+        top_p: 0.9,
+        max_tokens: 300 // Add max_tokens parameter
+      };
+
+      console.log("handleSubmit: Attempting fetch to /api/models/select with body:", requestBody);
+
+      const response = await fetch(`${API_BASE_URL}/api/models/select`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'text/event-stream'
+        },
+        body: JSON.stringify(requestBody),
+>>>>>>> Stashed changes
       });
 
       // Extract response data
@@ -131,11 +160,24 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   // Get color for category chip
   const getCategoryColor = (category: string) => {
     const colorMap: Record<string, string> = {
+<<<<<<< Updated upstream
       creative: theme.palette.success.main,
       factual: theme.palette.info.main,
       coding: theme.palette.warning.main,
       math: theme.palette.error.main,
       reasoning: theme.palette.secondary.main
+=======
+      reasoning: '#FF9800',    // Orange
+      'function-calling': '#9C27B0', // Purple
+      'text-to-text': '#4CAF50',    // Green
+      multilingual: '#2196F3',  // Blue
+      safety: '#F44336',     // Red
+      // Keep old categories for backward compatibility
+      creative: '#4CAF50', 
+      factual: '#2196F3',  
+      coding: '#9C27B0',   
+      math: '#F44336'
+>>>>>>> Stashed changes
     };
     return colorMap[category] || theme.palette.primary.main;
   };
@@ -204,6 +246,7 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                     : theme.palette.background.paper
                 }}
               >
+<<<<<<< Updated upstream
                 <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                   <Typography 
                     variant="body1" 
@@ -252,6 +295,53 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                           {Object.entries(message.modelInfo.allCategories)
                             .sort(([, a], [, b]) => b - a)
                             .map(([category, score]) => (
+=======
+                <Card 
+                  elevation={1}
+                  sx={{ 
+                    maxWidth: '80%',
+                    borderRadius: 2,
+                    bgcolor: message.sender === 'user' 
+                      ? theme.palette.primary.light
+                      : theme.palette.background.paper
+                  }}
+                >
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    {message.sender === 'user' ? (
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          color: theme.palette.primary.contrastText,
+                          whiteSpace: 'pre-wrap' // Keep pre-wrap for user messages
+                        }}
+                      >
+                        {message.text}
+                      </Typography>
+                    ) : (
+                      // Use ReactMarkdown for assistant messages
+                      <ReactMarkdown
+                        components={{
+                          p: ({node, ...props}) => <Typography variant="body2" paragraph sx={{mb:1}} {...props} />,
+                          ul: ({node, ...props}) => <Box component="ul" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
+                          ol: ({node, ...props}) => <Box component="ol" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
+                          li: ({node, children, ...props}) => (
+                            <li style={{ marginBottom: '4px' }}>
+                              <Typography variant="body2" component="span" sx={{ display: 'inline', '& > p': { display: 'inline' } }} {...props}>
+                                {children}
+                              </Typography>
+                            </li>
+                          ),
+                        }}
+                      >{message.text}</ReactMarkdown>
+                    )}
+                    
+                    {message.sender === 'assistant' && message.modelInfo && (
+                      <>
+                        <Divider sx={{ my: 1.5 }} />
+                        <Box sx={{ mt: 1 }}>
+                          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                            {message.modelInfo?.prompt_category && (
+>>>>>>> Stashed changes
                               <Chip
                                 key={category}
                                 label={`${category}: ${(score * 100).toFixed(0)}%`}

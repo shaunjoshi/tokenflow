@@ -2,19 +2,77 @@
 import contextlib
 import logging
 from datetime import datetime
+<<<<<<< Updated upstream
 from typing import List, Dict, Any, Optional, Union  # Import List for type hinting
 
 import httpx
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 # --- Text Splitter ---
+=======
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator
+import asyncio
+
+import httpx
+import json
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
+>>>>>>> Stashed changes
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel as PydanticBaseModel
-# --- Import Supabase create_client and AsyncClient ---
 from supabase import create_async_client, AsyncClient
 
-# --- Import for BART classification ---
+# Define model categories as a constant to be used throughout the application
+DEFAULT_MODEL_CATEGORIES = ["reasoning", "function-calling", "text-to-text", "multilingual", "nsfw"]
+
+# Define model rankings data for frontend consumption
+MODEL_RANKINGS = {
+    "reasoning": {
+        "title": "Reasoning",
+        "description": "Logic, problem-solving, and analysis",
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "primary": True},
+            {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "primary": False},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "primary": False},
+        ]
+    },
+    "function-calling": {
+        "title": "Function Calling",
+        "description": "API interactions and tool usage",
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "primary": True},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "primary": False},
+        ]
+    },
+    "text-to-text": {
+        "title": "Text to Text",
+        "description": "General text generation and transformation",
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "primary": True},
+            {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "primary": False},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "primary": False},
+        ]
+    },
+    "multilingual": {
+        "title": "Multilingual",
+        "description": "Cross-language generation and translation",
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "primary": True},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "primary": False},
+        ]
+    },
+    "nsfw": {
+        "title": "NSFW Detection",
+        "description": "Content moderation and safety evaluation",
+        "models": [
+            {"id": "llama-guard-3-8b", "name": "Llama Guard 3 8B", "primary": True},
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "primary": False},
+        ]
+    }
+}
+
 try:
     import torch
     from transformers import pipeline
@@ -23,14 +81,13 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
     logging.warning("Transformers or PyTorch not available. Model classification features will be disabled.")
 
-# --- OpenRouter Client ---
 from openai import AsyncOpenAI as AsyncOpenRouter
+from openai import AsyncOpenAI as AsyncGroqAI
 
-# --- Import from shared module ---
-# Use absolute imports instead of relative imports
 import backend.shared as shared
 from backend.shared import settings, get_current_user
 
+<<<<<<< Updated upstream
 # Uncomment and ensure dependencies are installed if /upload endpoint is used
 # import fitz # PyMuPDF
 # from fastapi import UploadFile, File, Form
@@ -39,55 +96,68 @@ from backend.shared import settings, get_current_user
 
 # --- Logging Setup ---
 # Configure logging (consider moving to shared.py or a dedicated logging setup)
+=======
+try:
+    import llmlingua
+    LLMLINGUA_AVAILABLE = True
+except ImportError:
+    LLMLINGUA_AVAILABLE = False
+    logging.warning("llmlingua not available. Compression features will be disabled.")
+
+>>>>>>> Stashed changes
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-log = logging.getLogger(__name__)  # Logger for this module
+log = logging.getLogger(__name__)
 
-# --- App State for Clients & Analyzers ---
-# Stores clients initialized during startup
 app_state: Dict[str, Any] = {}
 
+<<<<<<< Updated upstream
 
 # Add these near your other Pydantic models in main.py
 
 
 # --- FastAPI Lifespan Event Handler ---
+=======
+lingua_compressor: Optional[llmlingua.PromptCompressor] = None
+if LLMLINGUA_AVAILABLE:
+    try:
+        lingua_compressor = llmlingua.PromptCompressor(
+            model_name="microsoft/llmlingua-2-xlm-roberta-large-meetingbank",
+            use_llmlingua2=True,
+            device_map="cpu"
+        )
+        log.info("LLMLingua compressor initialized successfully using CPU.")
+    except Exception as e:
+        log.error(f"Failed to initialize LLMLingua compressor: {e}")
+        lingua_compressor = None
+else:
+    log.warning("LLMLingua dependency not found, compressor not initialized.")
+
+>>>>>>> Stashed changes
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
-    # --- Startup Logic ---
     log.info("Application startup: Initializing clients and analyzers...")
 
-    # Initialize Supabase Async Client
     initialized_supabase_client: AsyncClient | None = None
     try:
         if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
-            # Make sure to handle SecretStr appropriately
             service_key = settings.SUPABASE_SERVICE_ROLE_KEY
             if hasattr(service_key, 'get_secret_value'):
                 service_key = service_key.get_secret_value()
                 
-            # Use await here because we are in an async context
             initialized_supabase_client = await create_async_client(
                 settings.SUPABASE_URL,
                 service_key
             )
-            # Check type robustly
             if isinstance(initialized_supabase_client, AsyncClient):
                 log.info("Supabase AsyncClient initialized successfully via lifespan.")
-                # Optional: Perform a quick test connection if desired
-                # try:
-                #     await initialized_supabase_client.table('analyses').select('id', head=True).limit(1).execute()
-                #     log.info("Supabase connection test successful.")
-                # except Exception as db_conn_err:
-                #     log.error(f"Supabase connection test failed: {db_conn_err}")
-                #     initialized_supabase_client = None # Treat as failure if test fails
             else:
                 log.error(
                     f"Lifespan Error: create_client returned {type(initialized_supabase_client)} instead of AsyncClient!")
-                initialized_supabase_client = None  # Ensure it's None if wrong type
+                initialized_supabase_client = None
         else:
             log.error("Lifespan Error: Supabase URL/Service Key missing in settings.")
             initialized_supabase_client = None
@@ -95,14 +165,11 @@ async def lifespan(app: FastAPI):
         log.critical(f"CRITICAL: Failed to initialize Supabase client during startup: {e}")
         initialized_supabase_client = None
     finally:
-        # Store the result (client or None) in app state
         app_state["supabase_client"] = initialized_supabase_client
     
-    # Initialize OpenRouter Client
     initialized_openrouter_client: AsyncOpenRouter | None = None
     try:
         if settings.OPENROUTER_API_BASE_URL and settings.OPENROUTER_API_KEY:
-            # Make sure to handle SecretStr appropriately
             api_key = settings.OPENROUTER_API_KEY
             if hasattr(api_key, 'get_secret_value'):
                 api_key = api_key.get_secret_value()
@@ -120,27 +187,44 @@ async def lifespan(app: FastAPI):
         log.critical(f"CRITICAL: Failed to initialize OpenRouter client during startup: {e}")
         initialized_openrouter_client = None
     finally:
-        # Store the result (client or None) in app state
         app_state["openrouter_client"] = initialized_openrouter_client
 
-    # Initialize BART Classifier
+    initialized_groq_client: AsyncGroqAI | None = None
+    try:
+        if settings.GROQ_API_BASE_URL and settings.GROQ_API_KEY:
+            api_key = settings.GROQ_API_KEY
+            if hasattr(api_key, 'get_secret_value'):
+                api_key = api_key.get_secret_value()
+                
+            initialized_groq_client = AsyncGroqAI(
+                api_key=api_key,
+                base_url=settings.GROQ_API_BASE_URL,
+                timeout=30.0,
+            )
+            log.info("Groq client initialized successfully via lifespan.")
+        else:
+            log.error("Lifespan Error: Groq URL/Key missing in settings.")
+            initialized_groq_client = None
+    except Exception as e:
+        log.critical(f"CRITICAL: Failed to initialize Groq client during startup: {e}")
+        initialized_groq_client = None
+    finally:
+        app_state["groq_client"] = initialized_groq_client
+
     initialized_bart_classifier = None
     try:
         if not TRANSFORMERS_AVAILABLE:
             log.warning("Skipping BART classifier initialization as dependencies are not available.")
             initialized_bart_classifier = None
         else:
-            # Load BART model for text classification
             model_name = "facebook/bart-large-mnli"
-            # Only initialize if CUDA is available, otherwise log warning
             if torch.cuda.is_available():
-                device = 0  # Use first GPU
+                device = 0
                 log.info(f"CUDA available, initializing BART classifier on GPU device {device}")
             else:
-                device = -1  # CPU
+                device = -1
                 log.warning("CUDA not available, initializing BART classifier on CPU (slower performance)")
             
-            # Initialize the classification pipeline
             initialized_bart_classifier = pipeline(
                 "zero-shot-classification",
                 model=model_name,
@@ -152,15 +236,14 @@ async def lifespan(app: FastAPI):
     finally:
         app_state["bart_classifier"] = initialized_bart_classifier
 
-    # Store Text Splitter (initialized outside lifespan)
     text_splitter = None
     try:
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=250,  # Adjust as needed
+            chunk_size=250,
             chunk_overlap=30,
             length_function=len,
             is_separator_regex=False,
-            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""],  # Prioritize sentences/paragraphs
+            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""],
         )
         log.info("Text Splitter initialized.")
         app_state["text_splitter"] = text_splitter
@@ -170,23 +253,22 @@ async def lifespan(app: FastAPI):
 
     log.info("Client/Analyzer initialization process complete.")
     
+<<<<<<< Updated upstream
     yield  # Application runs after yield
+=======
+    app_state["lingua_compressor"] = lingua_compressor
     
-    # --- Shutdown Logic ---
+    yield
+>>>>>>> Stashed changes
+    
     log.info("Application shutdown: Cleaning up resources...")
-    # Example: Close httpx clients if needed (openai client handles its own)
     supabase_client_to_close = app_state.get("supabase_client")
     if supabase_client_to_close and hasattr(supabase_client_to_close, 'aclose'):
         try:
-            # Supabase client v2 doesn't have an explicit aclose, it relies on httpx client closure.
-            # If you were managing a raw httpx client, you'd close it here.
-            # For Supabase v2, usually no specific action needed on shutdown.
             log.info("Checked Supabase client for cleanup (v2 usually self-manages).")
         except Exception as e:
             log.error(f"Error during Supabase client hypothetical cleanup: {e}")
 
-
-# --- FastAPI App Initialization with Lifespan ---
 app = FastAPI(
     title="Intelligent Model Selection API",
     description="API for prompt classification and intelligent model selection using BART and OpenRouter",
@@ -194,9 +276,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# --- CORS Middleware ---
 origins = [
     "http://localhost:3000",
+    "http://192.168.4.206:3000",
     # Add production frontend URL here
     # "https://your-deployed-app.com",
 ]
@@ -204,22 +286,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],  # Limit methods
-    allow_headers=["Authorization", "Content-Type"],  # Limit headers
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 log.info(f"CORS middleware configured for origins: {origins}")
 
-
-# --- Pydantic Models for Model Selection ---
 class ModelSelectionRequest(PydanticBaseModel):
     prompt: str = Field(..., min_length=5, max_length=2000, description="The prompt text to classify and process")
     possible_categories: list[str] = Field(
-        default=["creative", "factual", "coding", "math", "reasoning"], 
+        default=DEFAULT_MODEL_CATEGORIES, 
         description="Categories to classify the prompt against"
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for model generation")
     top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p for model generation")
-
+    max_tokens: int = Field(default=250, gt=0, description="Maximum tokens to generate")
 
 class ModelSelectionResponse(PydanticBaseModel):
     selected_model: str
@@ -228,16 +308,13 @@ class ModelSelectionResponse(PydanticBaseModel):
     all_categories: Dict[str, float]
     completion: str
 
-
-# --- Pydantic Models for Classification ---
 class ClassificationRequest(PydanticBaseModel):
     prompt: str = Field(..., min_length=5, max_length=2000, description="The prompt text to classify")
     possible_categories: list[str] = Field(
-        default=["creative", "factual", "coding", "math", "reasoning"], 
+        default=DEFAULT_MODEL_CATEGORIES, 
         description="Categories to classify the prompt against"
     )
     multi_label: bool = Field(default=False, description="Whether to allow multiple category labels")
-
 
 class ClassificationResponse(PydanticBaseModel):
     top_category: str
@@ -245,8 +322,29 @@ class ClassificationResponse(PydanticBaseModel):
     all_categories: Dict[str, float]
     recommended_model: str
 
+<<<<<<< Updated upstream
 
 # --- Dependency Injectors for Clients/Tools ---
+=======
+class CompressionRequest(PydanticBaseModel):
+    text: str = Field(..., min_length=10, description="The text to compress")
+    target_token: int = Field(default=100, gt=0, description="Target number of tokens after compression")
+
+class CompressionResponse(PydanticBaseModel):
+    original_text: str
+    compressed_text: str
+    original_tokens: int
+    compressed_tokens: int
+    compression_ratio: float
+
+class GenerateRequest(PydanticBaseModel):
+    prompt: str = Field(..., min_length=1, description="The prompt to send to the LLM")
+    model: str = Field(..., description="The specific OpenRouter model ID to use (e.g., 'anthropic/claude-3-sonnet:beta')")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperature for model generation")
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p for model generation")
+    max_tokens: int = Field(default=250, gt=0, description="Maximum tokens to generate")
+
+>>>>>>> Stashed changes
 def get_supabase_client() -> AsyncClient:
     """Dependency injector for the initialized Supabase client."""
     client = app_state.get("supabase_client")
@@ -254,7 +352,6 @@ def get_supabase_client() -> AsyncClient:
         log.error("Supabase client requested but is not available (initialization failed?).")
         raise HTTPException(status_code=503, detail="Database service temporarily unavailable.")
     return client
-
 
 def get_bart_classifier():
     """Dependency injector for the initialized BART classifier."""
@@ -264,7 +361,6 @@ def get_bart_classifier():
         raise HTTPException(status_code=503, detail="Text classification service temporarily unavailable.")
     return classifier
 
-
 def get_openrouter_client() -> AsyncOpenRouter:
     """Dependency injector for the initialized OpenRouter client."""
     client = app_state.get("openrouter_client")
@@ -272,7 +368,6 @@ def get_openrouter_client() -> AsyncOpenRouter:
         log.error("OpenRouter client requested but is not available (initialization failed?).")
         raise HTTPException(status_code=503, detail="OpenRouter service temporarily unavailable.")
     return client
-
 
 def get_text_splitter() -> RecursiveCharacterTextSplitter:
     """Dependency injector for the initialized text splitter."""
@@ -282,13 +377,33 @@ def get_text_splitter() -> RecursiveCharacterTextSplitter:
         raise HTTPException(status_code=503, detail="Text processing service temporarily unavailable.")
     return splitter
 
+<<<<<<< Updated upstream
 
 # --- Define Model Selection Logic ---
+=======
+def get_lingua_compressor() -> llmlingua.PromptCompressor:
+    """Dependency injector for the initialized LLMLingua compressor."""
+    compressor = app_state.get("lingua_compressor")
+    if compressor is None:
+        log.error("LLMLingua compressor requested but is not available (initialization failed or dependency missing?).")
+        raise HTTPException(status_code=503, detail="Compression service temporarily unavailable.")
+    return compressor
+
+def get_groq_client() -> AsyncGroqAI:
+    """Dependency injector for the initialized Groq client."""
+    client = app_state.get("groq_client")
+    if client is None:
+        log.error("Groq client requested but is not available (initialization failed?).")
+        raise HTTPException(status_code=503, detail="Groq service temporarily unavailable.")
+    return client
+
+>>>>>>> Stashed changes
 async def select_model_for_category(category: str) -> str:
     """
-    Select the most appropriate OpenRouter model based on the prompt category.
-    Returns the model ID to be used with OpenRouter.
+    Select the most appropriate Groq model based on the prompt category.
+    Returns the model ID to be used with Groq API.
     """
+<<<<<<< Updated upstream
     model_mapping = {
         "creative": "anthropic/claude-3-opus:beta",  # Best for creative tasks
         "factual": "microsoft/phi-4-reasoning-plus:free",  # Good for fact-based tasks
@@ -298,9 +413,23 @@ async def select_model_for_category(category: str) -> str:
         # Default fallback
         "default": "mistralai/mistral-7b"
     }
+=======
+    # Check if category exists in MODEL_RANKINGS
+    if category.lower() in MODEL_RANKINGS:
+        # Get the primary model for this category
+        for model in MODEL_RANKINGS[category.lower()]["models"]:
+            if model["primary"]:
+                return model["id"]
+        
+        # If no primary model found, use the first one
+        if MODEL_RANKINGS[category.lower()]["models"]:
+            return MODEL_RANKINGS[category.lower()]["models"][0]["id"]
+>>>>>>> Stashed changes
     
-    return model_mapping.get(category.lower(), model_mapping["default"])
+    # Default fallback if category not found or no models defined
+    return "llama-3.1-8b-instant"
 
+<<<<<<< Updated upstream
 
 # --- Model Selection Endpoint ---
 @app.post("/api/models/select", response_model=ModelSelectionResponse)
@@ -308,11 +437,20 @@ async def select_model(
     request: ModelSelectionRequest,
     bart_classifier = Depends(get_bart_classifier),
     openrouter_client = Depends(get_openrouter_client)
+=======
+@app.post("/api/models/select")
+async def stream_model_selection(
+    request_data: ModelSelectionRequest,
+    request: Request,
+    bart_classifier=Depends(get_bart_classifier),
+    groq_client=Depends(get_groq_client),
+>>>>>>> Stashed changes
 ):
     """
     Classifies a prompt using Facebook BART and selects the appropriate model from OpenRouter.ai.
     Then processes the prompt with the selected model and returns the result.
     """
+<<<<<<< Updated upstream
     prompt = request.prompt
     categories = request.possible_categories
     
@@ -331,6 +469,111 @@ async def select_model(
         # Extract classification results
         top_category = classification_result["labels"][0]
         top_score = classification_result["scores"][0]
+=======
+    prompt = request_data.prompt
+    categories = request_data.possible_categories
+    temperature = request_data.temperature
+    top_p = request_data.top_p
+    max_tokens = request_data.max_tokens
+    
+    log.info(f"Initiating streaming request for prompt length: {len(prompt)}")
+    log.info(f"Categories: {categories}, Temp: {temperature}, Top-P: {top_p}, Max Tokens: {max_tokens}")
+
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            log.info("Classifying prompt with BART...")
+            classification_result = bart_classifier(
+                prompt, categories, multi_label=False
+            )
+            top_category = classification_result["labels"][0]
+            top_score = classification_result["scores"][0]
+            all_categories = {
+                label: score 
+                for label, score in zip(classification_result["labels"], classification_result["scores"])
+            }
+            log.info(f"Classified as '{top_category}' ({top_score:.2f})")
+
+            selected_model = await select_model_for_category(top_category)
+            log.info(f"Selected model: {selected_model}")
+
+            metadata = {
+                "prompt_category": top_category,
+                "confidence_score": top_score,
+                "selected_model": selected_model,
+                "all_categories": all_categories,
+            }
+            log.info("Yielding metadata event")
+            yield {
+                "event": "metadata",
+                "data": json.dumps(metadata) 
+            }
+            log.info("Sent metadata event")
+
+            log.info(f"Streaming from Groq model: {selected_model}")
+            stream = await groq_client.chat.completions.create(
+                model=selected_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            log.info("Got stream object from Groq. Starting iteration...")
+            
+            chunk_count = 0
+            async for chunk in stream:
+                chunk_count += 1
+                log.debug(f"Received chunk {chunk_count} from Groq stream")
+                if await request.is_disconnected():
+                    log.warning("Client disconnected, stopping stream.")
+                    break
+                content = chunk.choices[0].delta.content
+                
+                log.info(f"[BACKEND STREAM] Raw chunk content: {repr(content)}")
+
+                if content:
+                    log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")
+                    yield {
+                        "event": "text_chunk",
+                        "data": content
+                    }
+            log.info(f"Finished iterating through Groq stream after {chunk_count} chunks.")
+            
+            log.info("Yielding end_stream event")
+            yield {"event": "end_stream", "data": "Stream finished"}
+            log.info("Finished streaming and sent end event.")
+
+        except Exception as e:
+            log.error(f"Error during stream generation: {e}", exc_info=True)
+            error_data = {"error": "An error occurred during processing.", "detail": str(e)}
+            log.info("Yielding error event")
+            yield {
+                "event": "error",
+                "data": json.dumps(error_data)
+            }
+
+    return EventSourceResponse(event_generator())
+
+@app.post("/api/compress", response_model=CompressionResponse)
+async def compress_text(
+    request: CompressionRequest,
+    compressor: llmlingua.PromptCompressor = Depends(get_lingua_compressor)
+):
+    """Compresses the input text using LLMLingua."""
+    log.info(f"Received compression request. Target tokens: {request.target_token}")
+    try:
+        result = await asyncio.to_thread(
+            compressor.compress_prompt,
+            request.text,
+            target_token=request.target_token,
+        )
+        
+        original_text = request.text
+        compressed_text = result.get("compressed_prompt", "")
+        original_tokens = result.get("origin_tokens", 0)
+        compressed_tokens = result.get("compressed_tokens", 0)
+        compression_ratio = original_tokens / compressed_tokens if compressed_tokens > 0 else 0
+>>>>>>> Stashed changes
         
         log.info(f"Prompt classified as '{top_category}' with confidence {top_score:.2f}")
         
@@ -373,8 +616,74 @@ async def select_model(
             detail=f"Failed to process request: {str(e)}"
         )
 
+<<<<<<< Updated upstream
 
 # --- Classification-Only Endpoint ---
+=======
+@app.post("/api/generate")
+async def stream_direct_generation(
+    request_data: GenerateRequest,
+    request: Request,
+    groq_client=Depends(get_groq_client),
+):
+    """Streams a completion directly from a specified Groq model using SSE."""
+    prompt = request_data.prompt
+    model = request_data.model
+    temperature = request_data.temperature
+    top_p = request_data.top_p
+    max_tokens = request_data.max_tokens
+    
+    log.info(f"Initiating direct generation stream. Model: {model}, Prompt length: {len(prompt)}")
+    log.info(f"Params: Temp: {temperature}, Top-P: {top_p}, Max Tokens: {max_tokens}")
+
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            log.info(f"Streaming from Groq model: {model}")
+            stream = await groq_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            log.info("Got stream object from Groq. Starting iteration...")
+            
+            chunk_count = 0
+            async for chunk in stream:
+                chunk_count += 1
+                log.debug(f"Received chunk {chunk_count} from Groq stream")
+                if await request.is_disconnected():
+                    log.warning("Client disconnected, stopping stream.")
+                    break
+                
+                content = chunk.choices[0].delta.content
+                log.info(f"[BACKEND GEN STREAM] Raw chunk content: {repr(content)}")
+                
+                if content:
+                    log.info(f"Yielding text chunk {chunk_count}: {content[:50]}...")
+                    yield {
+                        "event": "text_chunk",
+                        "data": content
+                    }
+            log.info(f"Finished iterating through Groq stream after {chunk_count} chunks.")
+            
+            log.info("Yielding end_stream event")
+            yield {"event": "end_stream", "data": "Stream finished"}
+            log.info("Finished streaming and sent end event.")
+
+        except Exception as e:
+            log.error(f"Error during direct generation stream: {e}", exc_info=True)
+            error_data = {"error": "An error occurred during generation.", "detail": str(e)}
+            log.info("Yielding error event")
+            yield {
+                "event": "error",
+                "data": json.dumps(error_data)
+            }
+
+    return EventSourceResponse(event_generator())
+
+>>>>>>> Stashed changes
 @app.post("/api/classify", response_model=ClassificationResponse)
 async def classify_prompt(
     request: ClassificationRequest,
@@ -391,7 +700,6 @@ async def classify_prompt(
     log.info(f"Categories to classify against: {categories}")
     
     try:
-        # Use BART to classify prompt
         log.info("Classifying prompt with BART...")
         classification_result = bart_classifier(
             prompt, 
@@ -399,22 +707,18 @@ async def classify_prompt(
             multi_label=request.multi_label
         )
         
-        # Extract classification results
         top_category = classification_result["labels"][0]
         top_score = classification_result["scores"][0]
         
         log.info(f"Prompt classified as '{top_category}' with confidence {top_score:.2f}")
         
-        # Convert all classification results to dictionary
         all_categories = {
             label: score 
             for label, score in zip(classification_result["labels"], classification_result["scores"])
         }
         
-        # Get recommended model without actually using it
         recommended_model = await select_model_for_category(top_category)
         
-        # Return the results
         return ClassificationResponse(
             top_category=top_category,
             confidence_score=top_score,
@@ -427,5 +731,20 @@ async def classify_prompt(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process classification request: {str(e)}"
+        )
+
+@app.get("/api/model-rankings")
+async def get_model_rankings():
+    """
+    Returns the model rankings data for all categories.
+    This data is used by the frontend to display model recommendations.
+    """
+    try:
+        return MODEL_RANKINGS
+    except Exception as e:
+        log.error(f"Error retrieving model rankings: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve model rankings data"
         )
 
