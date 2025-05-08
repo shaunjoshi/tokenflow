@@ -16,22 +16,15 @@ import {
   InputAdornment,
   Stack,
   Alert,
-<<<<<<< Updated upstream
-  useTheme
-=======
   useTheme,
   PaperTypeMap,
->>>>>>> Stashed changes
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-<<<<<<< Updated upstream
-=======
 import ReactMarkdown from 'react-markdown';
 
 // Define API Base URL (ensure it's available, e.g., from process.env)
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000'; // Remove trailing slash if present
->>>>>>> Stashed changes
 
 interface ModelSelectionChatViewProps {
   session: Session;
@@ -69,9 +62,9 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
     e.preventDefault();
     if (!inputText.trim() || isLoading) return;
     
-    const client = apiClient();
-    if (!client) {
-      setError('API client not available. Please check your connection.');
+    const token = session?.access_token;
+    if (!token) {
+      setError('Authentication token not available. Please log in again.');
       return;
     }
 
@@ -84,24 +77,96 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
     };
     
     setMessages(prev => [...prev, userMessage]);
+    
+    // Add placeholder assistant message
+    const assistantId = Date.now().toString() + '-assistant';
+    const placeholderMessage: Message = {
+      id: assistantId,
+      text: '',
+      sender: 'assistant',
+      timestamp: new Date(),
+    };
+    
+    setMessages(prev => [...prev, placeholderMessage]);
     setInputText('');
     setIsLoading(true);
     setError(null);
 
+    // Helper function to process individual SSE event blocks
+    const processSseEventBlock = (block: string, targetAssistantId: string) => {
+      let eventType = '';
+      let eventData = '';
+      const lines = block.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          eventType = line.substring(6).trim();
+        } else if (line.startsWith('data:')) {
+          eventData = line.substring(5);
+        }
+      }
+
+      // console.log(`[ModelSelectionChatView] Processed Event: ${eventType}, Data: ${eventData.substring(0, 100)}`);
+
+      if (eventType === 'metadata' && eventData) {
+        try {
+          const metadata = JSON.parse(eventData);
+          const newModelInfo = {
+            category: metadata.prompt_category,
+            confidence: metadata.confidence_score,
+            model: metadata.selected_model,
+            allCategories: metadata.all_categories,
+          };
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === targetAssistantId
+                ? { ...msg, modelInfo: newModelInfo }
+                : msg
+            )
+          );
+        } catch (e) {
+          console.error('[ModelSelectionChatView] Error parsing metadata:', e);
+        }
+      } else if (eventType === 'text_chunk' && eventData !== undefined) {
+        setMessages(prev =>
+          prev.map(msg => {
+            if (msg.id === targetAssistantId) {
+              let currentText = msg.text || '';
+              let newTextPortion = eventData;
+
+              // If current text ends with a space and new portion also starts with a space,
+              // append the new portion without its leading space to avoid double spaces.
+              if (currentText.endsWith(' ') && newTextPortion.startsWith(' ')) {
+                currentText += newTextPortion.substring(1);
+              } else {
+                currentText += newTextPortion;
+              }
+              return { ...msg, text: currentText };
+            }
+            return msg;
+          })
+        );
+      } else if (eventType === 'error' && eventData) {
+        console.error('[ModelSelectionChatView] SSE Error Event:', eventData);
+        try {
+          const errorData = JSON.parse(eventData);
+          throw new Error(errorData.detail || errorData.error || 'Unknown server error in stream');
+        } catch (e: any) {
+          throw new Error('Error in stream: ' + (e.message || eventData || 'Unknown error'));
+        }
+      } else if (eventType === 'end_stream') {
+        console.log("[ModelSelectionChatView] Received end_stream from backend.");
+      }
+    };
+
     try {
-      // Send to model selection API
-      const response = await client.post('/api/models/select', {
+      const requestBody = {
         prompt: inputText,
         possible_categories: categories,
         temperature: 0.7,
-<<<<<<< Updated upstream
-        top_p: 0.9
-=======
         top_p: 0.9,
-        max_tokens: 300 // Add max_tokens parameter
+        max_tokens: 300
       };
-
-      console.log("handleSubmit: Attempting fetch to /api/models/select with body:", requestBody);
 
       const response = await fetch(`${API_BASE_URL}/api/models/select`, {
         method: 'POST',
@@ -111,36 +176,49 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
           'Accept': 'text/event-stream'
         },
         body: JSON.stringify(requestBody),
->>>>>>> Stashed changes
       });
 
-      // Extract response data
-      const { 
-        completion, 
-        prompt_category, 
-        confidence_score, 
-        selected_model,
-        all_categories 
-      } = response.data;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
 
-      // Add assistant response with model info
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        text: completion,
-        sender: 'assistant',
-        timestamp: new Date(),
-        modelInfo: {
-          category: prompt_category,
-          confidence: confidence_score,
-          model: selected_model,
-          allCategories: all_categories
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      const boundaryRegex = /(\r?\n){2}/; // Matches \n\n or \r\n\r\n
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          console.log('[ModelSelectionChatView] Stream complete');
+          if (buffer.trim()) {
+            processSseEventBlock(buffer.trim(), assistantId);
+          }
+          break;
         }
-      };
 
-      setMessages(prev => [...prev, assistantMessage]);
+        buffer += value;
+        let match;
+        // Process buffer for complete event blocks
+        while ((match = buffer.match(boundaryRegex)) && match.index !== undefined) {
+          const eventBlock = buffer.substring(0, match.index);
+          buffer = buffer.substring(match.index + match[0].length);
+          if (eventBlock.trim()) {
+            processSseEventBlock(eventBlock, assistantId);
+          }
+        }
+      }
     } catch (err: any) {
       console.error('API request failed:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to get response');
+      setError(err.message || 'Failed to get response');
+      
+      // Remove the placeholder message if there was an error
+      setMessages(prev => prev.filter(msg => msg.id !== assistantId));
     } finally {
       setIsLoading(false);
     }
@@ -160,13 +238,6 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   // Get color for category chip
   const getCategoryColor = (category: string) => {
     const colorMap: Record<string, string> = {
-<<<<<<< Updated upstream
-      creative: theme.palette.success.main,
-      factual: theme.palette.info.main,
-      coding: theme.palette.warning.main,
-      math: theme.palette.error.main,
-      reasoning: theme.palette.secondary.main
-=======
       reasoning: '#FF9800',    // Orange
       'function-calling': '#9C27B0', // Purple
       'text-to-text': '#4CAF50',    // Green
@@ -177,7 +248,6 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
       factual: '#2196F3',  
       coding: '#9C27B0',   
       math: '#F44336'
->>>>>>> Stashed changes
     };
     return colorMap[category] || theme.palette.primary.main;
   };
@@ -246,116 +316,111 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                     : theme.palette.background.paper
                 }}
               >
-<<<<<<< Updated upstream
                 <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                  <Typography 
-                    variant="body1" 
-                    sx={{ 
-                      color: message.sender === 'user' 
-                        ? theme.palette.primary.contrastText
-                        : theme.palette.text.primary,
-                      whiteSpace: 'pre-wrap'
-                    }}
-                  >
-                    {message.text}
-                  </Typography>
+                  {message.sender === 'user' ? (
+                    <Typography 
+                      variant="body1" 
+                      sx={{ 
+                        color: theme.palette.primary.contrastText,
+                        whiteSpace: 'pre-wrap' 
+                      }}
+                    >
+                      {message.text}
+                    </Typography>
+                  ) : (
+                    <Box sx={{ color: 'text.primary', whiteSpace: 'pre-wrap' }}>
+                      {message.text ? (
+                        <ReactMarkdown
+                          components={{
+                            p: ({node, ...props}) => <Typography variant="body2" paragraph sx={{mb:1, whiteSpace: 'pre-wrap'}} {...props} />,
+                            ul: ({node, ...props}) => <Box component="ul" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
+                            ol: ({node, ...props}) => <Box component="ol" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
+                            li: ({node, children, ...props}) => (
+                              <li style={{ marginBottom: '4px' }}>
+                                <Typography variant="body2" component="span" sx={{ display: 'inline', '& > p': { display: 'inline' } }} {...props}>
+                                  {children}
+                                </Typography>
+                              </li>
+                            ),
+                            code: ({node, children, className, ...props}: any) => {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const isInline = !match && !className;
+                              return isInline 
+                                ? <Typography component="code" variant="body2" sx={{ fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', px: 0.5, borderRadius: 0.5 }} {...props}>{children}</Typography>
+                                : <Box component="pre" sx={{ fontFamily: 'monospace', bgcolor: 'rgba(0,0,0,0.05)', p: 1, borderRadius: 1, overflowX: 'auto' }} {...props}>{children}</Box>;
+                            },
+                          }}
+                        >
+                          {message.text}
+                        </ReactMarkdown>
+                      ) : (
+                        <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>
+                          Waiting for response...
+                        </Typography>
+                      )}
+                    </Box>
+                  )}
                   
-                  {message.modelInfo && (
+                  {message.sender === 'assistant' && message.modelInfo && (
                     <>
                       <Divider sx={{ my: 1.5 }} />
                       <Box sx={{ mt: 1 }}>
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                          <Chip 
-                            label={`Category: ${message.modelInfo.category}`}
-                            size="small"
-                            sx={{ 
-                              bgcolor: getCategoryColor(message.modelInfo.category),
-                              color: '#fff',
-                              fontWeight: 'bold'
-                            }}
-                          />
-                          <Chip 
-                            label={`Confidence: ${(message.modelInfo.confidence * 100).toFixed(0)}%`}
-                            size="small"
-                            variant="outlined"
-                          />
-                          <Chip 
-                            label={`Model: ${formatModelName(message.modelInfo.model)}`}
-                            size="small"
-                            variant="outlined"
-                            icon={<AutoAwesomeIcon fontSize="small" />}
-                            sx={{ fontWeight: 'medium' }}
-                          />
+                          {message.modelInfo.category && (
+                            <Chip
+                              label={`Category: ${message.modelInfo.category}`}
+                              size="small"
+                              sx={{
+                                bgcolor: getCategoryColor(message.modelInfo.category),
+                                color: '#fff',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                          )}
+                          
+                          {message.modelInfo.model && (
+                            <Chip 
+                              label={`Model: ${formatModelName(message.modelInfo.model)}`}
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                            />
+                          )}
+                          
+                          {message.modelInfo.confidence && (
+                            <Chip 
+                              label={`Confidence: ${(message.modelInfo.confidence * 100).toFixed(0)}%`}
+                              size="small"
+                              color="secondary"
+                              variant="outlined"
+                            />
+                          )}
                         </Stack>
 
-                        <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
-                          All Categories:
-                        </Typography>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                          {Object.entries(message.modelInfo.allCategories)
-                            .sort(([, a], [, b]) => b - a)
-                            .map(([category, score]) => (
-=======
-                <Card 
-                  elevation={1}
-                  sx={{ 
-                    maxWidth: '80%',
-                    borderRadius: 2,
-                    bgcolor: message.sender === 'user' 
-                      ? theme.palette.primary.light
-                      : theme.palette.background.paper
-                  }}
-                >
-                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                    {message.sender === 'user' ? (
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
-                          color: theme.palette.primary.contrastText,
-                          whiteSpace: 'pre-wrap' // Keep pre-wrap for user messages
-                        }}
-                      >
-                        {message.text}
-                      </Typography>
-                    ) : (
-                      // Use ReactMarkdown for assistant messages
-                      <ReactMarkdown
-                        components={{
-                          p: ({node, ...props}) => <Typography variant="body2" paragraph sx={{mb:1}} {...props} />,
-                          ul: ({node, ...props}) => <Box component="ul" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
-                          ol: ({node, ...props}) => <Box component="ol" sx={{ pl: 4, mt: 1, mb: 1 }} {...props} />,
-                          li: ({node, children, ...props}) => (
-                            <li style={{ marginBottom: '4px' }}>
-                              <Typography variant="body2" component="span" sx={{ display: 'inline', '& > p': { display: 'inline' } }} {...props}>
-                                {children}
-                              </Typography>
-                            </li>
-                          ),
-                        }}
-                      >{message.text}</ReactMarkdown>
-                    )}
-                    
-                    {message.sender === 'assistant' && message.modelInfo && (
-                      <>
-                        <Divider sx={{ my: 1.5 }} />
-                        <Box sx={{ mt: 1 }}>
-                          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                            {message.modelInfo?.prompt_category && (
->>>>>>> Stashed changes
-                              <Chip
-                                key={category}
-                                label={`${category}: ${(score * 100).toFixed(0)}%`}
-                                size="small"
-                                variant="outlined"
-                                sx={{ 
-                                  fontSize: '0.7rem',
-                                  height: 24,
-                                  opacity: score > 0.1 ? 1 : 0.7
-                                }}
-                              />
-                            ))
-                          }
-                        </Box>
+                        {message.modelInfo.allCategories && Object.keys(message.modelInfo.allCategories).length > 0 && (
+                          <>
+                            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+                              All Categories:
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                              {Object.entries(message.modelInfo.allCategories)
+                                .sort(([, a], [, b]) => b - a)
+                                .map(([category, score]) => (
+                                  <Chip
+                                    key={category}
+                                    label={`${category}: ${(score * 100).toFixed(0)}%`}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ 
+                                      fontSize: '0.7rem',
+                                      height: 24,
+                                      opacity: score > 0.1 ? 1 : 0.7
+                                    }}
+                                  />
+                                ))}
+                            </Box>
+                          </>
+                        )}
                       </Box>
                     </>
                   )}

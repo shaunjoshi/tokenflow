@@ -490,45 +490,21 @@ async def compress_text(
         compressed_tokens = result.get("compressed_tokens", 0)
         compression_ratio = original_tokens / compressed_tokens if compressed_tokens > 0 else 0
         
-        log.info(f"Prompt classified as '{top_category}' with confidence {top_score:.2f}")
-        
-        # Convert all classification results to dictionary
-        all_categories = {
-            label: score 
-            for label, score in zip(classification_result["labels"], classification_result["scores"])
-        }
-        
-        # Select the appropriate model based on the classification
-        selected_model = await select_model_for_category(top_category)
-        log.info(f"Selected model: {selected_model} for category: {top_category}")
-        
-        # Process the prompt with the selected model
-        log.info(f"Sending prompt to OpenRouter with model: {selected_model}")
-        completion_response = await openrouter_client.chat.completions.create(
-            model=selected_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=request.temperature,
-            top_p=request.top_p,
-        )
-        
-        # Extract the completion text
-        completion_text = completion_response.choices[0].message.content
-        log.info(f"Received completion from OpenRouter, length: {len(completion_text)} characters")
-        
-        # Return the results
-        return ModelSelectionResponse(
-            selected_model=selected_model,
-            prompt_category=top_category,
-            confidence_score=top_score,
-            all_categories=all_categories,
-            completion=completion_text
+        log.info(f"Compression successful. Original tokens: {original_tokens}, Compressed tokens: {compressed_tokens}")
+
+        return CompressionResponse(
+            original_text=original_text,
+            compressed_text=compressed_text,
+            original_tokens=original_tokens,
+            compressed_tokens=compressed_tokens,
+            compression_ratio=compression_ratio
         )
         
     except Exception as e:
-        log.error(f"Error in model selection endpoint: {e}")
+        log.error(f"Error in compression endpoint: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process request: {str(e)}"
+            detail=f"Failed to process compression request: {str(e)}"
         )
 
 @app.post("/api/generate")

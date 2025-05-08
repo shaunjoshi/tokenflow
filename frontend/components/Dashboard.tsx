@@ -4,11 +4,8 @@ import axios, {AxiosInstance} from 'axios';
 import {supabase} from '../clients/supabaseClient'; // Adjust path if needed
 import {Session} from '@supabase/supabase-js';
 import ModelSelectionChatView from './ModelSelectionChatView'; // Import model selection view
-<<<<<<< Updated upstream
-=======
 import PromptCompressionView from './PromptCompressionView'; // --- NEW: Import Compression View ---
 import ModelCategoryRankings from './ModelCategoryRankings'; // Import Model Category Rankings component
->>>>>>> Stashed changes
 import {
     AppBar,
     Box,
@@ -33,12 +30,13 @@ import MenuIcon from '@mui/icons-material/Menu'; // For potential mobile drawer 
 import AnalyticsIcon from '@mui/icons-material/Analytics'; // Alternative Sentiment Icon
 import LeaderboardIcon from '@mui/icons-material/Leaderboard'; // Alternative Ranker Icon
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // For Model Selection
+import CompressIcon from '@mui/icons-material/Compress'; // Added Compress Icon
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const drawerWidth = 240; // Define drawer width
 
 // --- Define Feature Key Type ---
-type FeatureKey = 'sentiment' | 'ranker' | 'model-selector';
+type FeatureKey = 'sentiment' | 'ranker' | 'model-selector' | 'prompt-compression';
 
 interface DashboardProps {
     session: Session;
@@ -92,12 +90,8 @@ function Dashboard({ session }: DashboardProps) {
         switch(selectedFeature) {
             case 'sentiment': return 'Sentiment Analysis';
             case 'ranker': return 'Product Ranker';
-<<<<<<< Updated upstream
-            case 'model-selector': return 'Model Selection Chat';
-=======
             case 'model-selector': return 'Intelligent Model Selection Chat';
             case 'prompt-compression': return 'Prompt Compression Demo'; // --- NEW Title ---
->>>>>>> Stashed changes
             default: return 'Dashboard';
         }
     };
@@ -125,6 +119,18 @@ function Dashboard({ session }: DashboardProps) {
                             <AutoAwesomeIcon color={selectedFeature === 'model-selector' ? 'primary' : 'action'} />
                         </ListItemIcon>
                         <ListItemText primary="Intelligent Model Selection Chat" />
+                    </ListItemButton>
+                </ListItem>
+                {/* Prompt Compression Link */}
+                <ListItem disablePadding>
+                    <ListItemButton
+                        selected={selectedFeature === 'prompt-compression'}
+                        onClick={() => handleFeatureSelect('prompt-compression')}
+                    >
+                        <ListItemIcon>
+                            <CompressIcon color={selectedFeature === 'prompt-compression' ? 'primary' : 'action'} />
+                        </ListItemIcon>
+                        <ListItemText primary="Prompt Compression" />
                     </ListItemButton>
                 </ListItem>
                 {/* Add more features here */}
@@ -226,11 +232,6 @@ function Dashboard({ session }: DashboardProps) {
                 }}
             >
                 {/* Conditionally render the selected feature's view */}
-<<<<<<< Updated upstream
-                {selectedFeature === 'model-selector' && (
-                    <ModelSelectionChatView session={session} apiClient={apiClient} />
-                )}
-=======
                 {selectedFeature === 'model-selector' ? (
                     <Box sx={{ display: 'flex', height: 'calc(100vh - 100px)' }}>
                         {/* Left side: Chat Interface (takes most of the space) */}
@@ -255,7 +256,6 @@ function Dashboard({ session }: DashboardProps) {
                 ) : selectedFeature === 'prompt-compression' ? (
                     <PromptCompressionView apiClient={apiClient} />
                 ) : null}
->>>>>>> Stashed changes
                 {/* Add more feature views here based on selectedFeature */}
             </Box>
         </Box>
