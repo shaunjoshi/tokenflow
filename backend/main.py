@@ -2,14 +2,6 @@
 import contextlib
 import logging
 from datetime import datetime
-<<<<<<< Updated upstream
-from typing import List, Dict, Any, Optional, Union  # Import List for type hinting
-
-import httpx
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-# --- Text Splitter ---
-=======
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 import asyncio
 
@@ -18,7 +10,6 @@ import json
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
->>>>>>> Stashed changes
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel as PydanticBaseModel
@@ -87,16 +78,6 @@ from openai import AsyncOpenAI as AsyncGroqAI
 import backend.shared as shared
 from backend.shared import settings, get_current_user
 
-<<<<<<< Updated upstream
-# Uncomment and ensure dependencies are installed if /upload endpoint is used
-# import fitz # PyMuPDF
-# from fastapi import UploadFile, File, Form
-# from langchain.text_splitter import CharacterTextSplitter
-# from langchain_community.vectorstores import Chroma
-
-# --- Logging Setup ---
-# Configure logging (consider moving to shared.py or a dedicated logging setup)
-=======
 try:
     import llmlingua
     LLMLINGUA_AVAILABLE = True
@@ -104,7 +85,6 @@ except ImportError:
     LLMLINGUA_AVAILABLE = False
     logging.warning("llmlingua not available. Compression features will be disabled.")
 
->>>>>>> Stashed changes
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -113,13 +93,6 @@ log = logging.getLogger(__name__)
 
 app_state: Dict[str, Any] = {}
 
-<<<<<<< Updated upstream
-
-# Add these near your other Pydantic models in main.py
-
-
-# --- FastAPI Lifespan Event Handler ---
-=======
 lingua_compressor: Optional[llmlingua.PromptCompressor] = None
 if LLMLINGUA_AVAILABLE:
     try:
@@ -135,7 +108,6 @@ if LLMLINGUA_AVAILABLE:
 else:
     log.warning("LLMLingua dependency not found, compressor not initialized.")
 
->>>>>>> Stashed changes
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
@@ -253,13 +225,9 @@ async def lifespan(app: FastAPI):
 
     log.info("Client/Analyzer initialization process complete.")
     
-<<<<<<< Updated upstream
-    yield  # Application runs after yield
-=======
     app_state["lingua_compressor"] = lingua_compressor
     
     yield
->>>>>>> Stashed changes
     
     log.info("Application shutdown: Cleaning up resources...")
     supabase_client_to_close = app_state.get("supabase_client")
@@ -322,10 +290,6 @@ class ClassificationResponse(PydanticBaseModel):
     all_categories: Dict[str, float]
     recommended_model: str
 
-<<<<<<< Updated upstream
-
-# --- Dependency Injectors for Clients/Tools ---
-=======
 class CompressionRequest(PydanticBaseModel):
     text: str = Field(..., min_length=10, description="The text to compress")
     target_token: int = Field(default=100, gt=0, description="Target number of tokens after compression")
@@ -344,7 +308,6 @@ class GenerateRequest(PydanticBaseModel):
     top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p for model generation")
     max_tokens: int = Field(default=250, gt=0, description="Maximum tokens to generate")
 
->>>>>>> Stashed changes
 def get_supabase_client() -> AsyncClient:
     """Dependency injector for the initialized Supabase client."""
     client = app_state.get("supabase_client")
@@ -377,10 +340,6 @@ def get_text_splitter() -> RecursiveCharacterTextSplitter:
         raise HTTPException(status_code=503, detail="Text processing service temporarily unavailable.")
     return splitter
 
-<<<<<<< Updated upstream
-
-# --- Define Model Selection Logic ---
-=======
 def get_lingua_compressor() -> llmlingua.PromptCompressor:
     """Dependency injector for the initialized LLMLingua compressor."""
     compressor = app_state.get("lingua_compressor")
@@ -397,23 +356,11 @@ def get_groq_client() -> AsyncGroqAI:
         raise HTTPException(status_code=503, detail="Groq service temporarily unavailable.")
     return client
 
->>>>>>> Stashed changes
 async def select_model_for_category(category: str) -> str:
     """
     Select the most appropriate Groq model based on the prompt category.
     Returns the model ID to be used with Groq API.
     """
-<<<<<<< Updated upstream
-    model_mapping = {
-        "creative": "anthropic/claude-3-opus:beta",  # Best for creative tasks
-        "factual": "microsoft/phi-4-reasoning-plus:free",  # Good for fact-based tasks
-        "coding": "openai/gpt-4-turbo",  # Strong for coding
-        "math": "anthropic/claude-3-opus:beta",  # Good for mathematical reasoning
-        "reasoning": "anthropic/claude-3-sonnet:beta",  # Good for general reasoning
-        # Default fallback
-        "default": "mistralai/mistral-7b"
-    }
-=======
     # Check if category exists in MODEL_RANKINGS
     if category.lower() in MODEL_RANKINGS:
         # Get the primary model for this category
@@ -424,52 +371,21 @@ async def select_model_for_category(category: str) -> str:
         # If no primary model found, use the first one
         if MODEL_RANKINGS[category.lower()]["models"]:
             return MODEL_RANKINGS[category.lower()]["models"][0]["id"]
->>>>>>> Stashed changes
     
     # Default fallback if category not found or no models defined
     return "llama-3.1-8b-instant"
 
-<<<<<<< Updated upstream
-
-# --- Model Selection Endpoint ---
-@app.post("/api/models/select", response_model=ModelSelectionResponse)
-async def select_model(
-    request: ModelSelectionRequest,
-    bart_classifier = Depends(get_bart_classifier),
-    openrouter_client = Depends(get_openrouter_client)
-=======
 @app.post("/api/models/select")
 async def stream_model_selection(
     request_data: ModelSelectionRequest,
     request: Request,
     bart_classifier=Depends(get_bart_classifier),
     groq_client=Depends(get_groq_client),
->>>>>>> Stashed changes
 ):
     """
     Classifies a prompt using Facebook BART and selects the appropriate model from OpenRouter.ai.
     Then processes the prompt with the selected model and returns the result.
     """
-<<<<<<< Updated upstream
-    prompt = request.prompt
-    categories = request.possible_categories
-    
-    log.info(f"Processing model selection request with prompt length: {len(prompt)}")
-    log.info(f"Categories to classify against: {categories}")
-    
-    try:
-        # Use BART to classify prompt
-        log.info("Classifying prompt with BART...")
-        classification_result = bart_classifier(
-            prompt, 
-            categories,
-            multi_label=False  # We want a single category
-        )
-        
-        # Extract classification results
-        top_category = classification_result["labels"][0]
-        top_score = classification_result["scores"][0]
-=======
     prompt = request_data.prompt
     categories = request_data.possible_categories
     temperature = request_data.temperature
@@ -573,7 +489,6 @@ async def compress_text(
         original_tokens = result.get("origin_tokens", 0)
         compressed_tokens = result.get("compressed_tokens", 0)
         compression_ratio = original_tokens / compressed_tokens if compressed_tokens > 0 else 0
->>>>>>> Stashed changes
         
         log.info(f"Prompt classified as '{top_category}' with confidence {top_score:.2f}")
         
@@ -616,10 +531,6 @@ async def compress_text(
             detail=f"Failed to process request: {str(e)}"
         )
 
-<<<<<<< Updated upstream
-
-# --- Classification-Only Endpoint ---
-=======
 @app.post("/api/generate")
 async def stream_direct_generation(
     request_data: GenerateRequest,
@@ -683,7 +594,6 @@ async def stream_direct_generation(
 
     return EventSourceResponse(event_generator())
 
->>>>>>> Stashed changes
 @app.post("/api/classify", response_model=ClassificationResponse)
 async def classify_prompt(
     request: ClassificationRequest,
