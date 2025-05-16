@@ -10,6 +10,8 @@ langchain-text-splitters>=0.0.1
 transformers>=4.35.0
 torch>=2.0.0
 tqdm>=4.66.1
-sentencepiece>=0.1.99
+sentencepiece==0.2.0
 protobuf>=4.23.0
-accelerate>=0.21.0 
+accelerate>=0.21.0
+sse-starlette==1.8.2
+llmlingua==0.2.2 

@@ -55,6 +55,29 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const theme = useTheme();
 
+  // Helper function to preprocess markdown text for better parsing
+  const preprocessMarkdown = (text: string): string => {
+    if (!text) return '';
+    let processedText = text;
+
+    // Normalize bold: ** text ** -> **text**
+    processedText = processedText.replace(/\*\*\s*([\s\S]+?)\s*\*\*/g, '**$1**');
+
+    // Normalize italic (underscore): _ text _ -> _text_
+    processedText = processedText.replace(/_\s*([\s\S]+?)\s*_/g, '_$1_');
+    
+    // Normalize strikethrough: ~~ text ~~ -> ~~text~~
+    processedText = processedText.replace(/~~\s*([\s\S]+?)\s*~~/g, '~~$1~~');
+
+    // For list items, ensure only one space after the marker (e.g. "*  item" becomes "* item")
+    processedText = processedText.split('\n').map(line => {
+      // Matches "*", "-", or "1." followed by two or more spaces at the start of a line (potentially with leading whitespace)
+      return line.replace(/^(\s*([*-]|\d+\.)\s)\s+/g, '$1');
+    }).join('\n');
+
+    return processedText;
+  };
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -380,7 +403,7 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                             a: ({node, ...props}) => <Link {...props} target="_blank" rel="noopener noreferrer" />,
                           }}
                         >
-                          {message.text}
+                          {preprocessMarkdown(message.text)}
                         </ReactMarkdown>
                       ) : (
                         <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>

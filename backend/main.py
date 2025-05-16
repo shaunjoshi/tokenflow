@@ -1,4 +1,6 @@
 # backend/main.py
+from __future__ import annotations
+
 import contextlib
 import logging
 from datetime import datetime

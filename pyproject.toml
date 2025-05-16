@@ -39,10 +39,12 @@ dependencies = [
     "transformers>=4.35.0,<4.40.0",   # Hugging Face transformers for BART
     "torch>=2.0.0,<3.0.0",            # PyTorch for transformers
     "tqdm>=4.66.1,<5.0.0",            # Progress bars for transformers
-    "sentencepiece>=0.2.0",   # Tokenization dependency for transformers
+    "sentencepiece>=0.1.99,<0.3.0",   # Tokenization dependency for transformers
     "protobuf>=4.23.0,<5.0.0",        # Protocol buffers for transformers
     "accelerate>=0.21.0,<0.30.0",     # Optional acceleration for transformers
     "python-dotenv>=1.0.0,<2.0.0",    # For loading .env files
+    "sse-starlette>=1.8.2,<1.9.0",     # For Server-Sent Events
+    "llmlingua>=0.2.2,<0.3.0"         # For prompt compression
 ]
 
 [project.urls] # Optional: Links for users
