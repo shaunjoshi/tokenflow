@@ -96,28 +96,20 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
 
     // Helper function to process individual SSE event blocks
     const processSseEventBlock = (block: string, targetAssistantId: string) => {
-      let eventType = '';
-      let eventData = '';
-      const lines = block.split('\n');
+      console.log('[ModelSelectionChatView] Processing SSE block:', block);
+      
+      try {
+        // Parse the JSON data directly since it's already in JSON format
+        const eventData = JSON.parse(block.replace('data: ', ''));
+        console.log('[ModelSelectionChatView] Parsed event data:', eventData);
 
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          eventType = line.substring(6).trim();
-        } else if (line.startsWith('data:')) {
-          eventData = line.substring(5);
-        }
-      }
-
-      // console.log(`[ModelSelectionChatView] Processed Event: ${eventType}, Data: ${eventData.substring(0, 100)}`);
-
-      if (eventType === 'metadata' && eventData) {
-        try {
-          const metadata = JSON.parse(eventData);
+        if (eventData.event === 'metadata' && eventData.data) {
+          console.log('[ModelSelectionChatView] Processing metadata:', eventData.data);
           const newModelInfo = {
-            category: metadata.prompt_category,
-            confidence: metadata.confidence_score,
-            model: metadata.selected_model,
-            allCategories: metadata.all_categories,
+            category: eventData.data.prompt_category || 'text-to-text',
+            confidence: eventData.data.confidence_score || 1.0,
+            model: eventData.data.selected_model || eventData.data.model,
+            allCategories: eventData.data.all_categories || {},
           };
           setMessages(prev =>
             prev.map(msg =>
@@ -126,51 +118,53 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
                 : msg
             )
           );
-        } catch (e) {
-          console.error('[ModelSelectionChatView] Error parsing metadata:', e);
-        }
-      } else if (eventType === 'text_chunk' && eventData !== undefined) {
-        setMessages(prev =>
-          prev.map(msg => {
-            if (msg.id === targetAssistantId) {
-              let currentText = msg.text || '';
-              let newTextPortion = eventData;
+        } else if (eventData.event === 'text_chunk' && eventData.data) {
+          setMessages(prev => {
+            console.log('[ModelSelectionChatView] Current messages:', prev);
+            return prev.map(msg => {
+              if (msg.id === targetAssistantId) {
+                let currentText = msg.text || '';
+                let newTextPortion = eventData.data;
+                console.log('[ModelSelectionChatView] Current text:', currentText);
+                console.log('[ModelSelectionChatView] New text portion:', newTextPortion);
 
-              // If current text ends with a space and new portion also starts with a space,
-              // append the new portion without its leading space to avoid double spaces.
-              if (currentText.endsWith(' ') && newTextPortion.startsWith(' ')) {
-                currentText += newTextPortion.substring(1);
-              } else {
-                currentText += newTextPortion;
+                // If current text ends with a space and new portion also starts with a space,
+                // append the new portion without its leading space to avoid double spaces.
+                if (currentText.endsWith(' ') && newTextPortion.startsWith(' ')) {
+                  currentText += newTextPortion.substring(1);
+                } else {
+                  currentText += newTextPortion;
+                }
+                console.log('[ModelSelectionChatView] Updated text:', currentText);
+                return { ...msg, text: currentText };
               }
-              return { ...msg, text: currentText };
-            }
-            return msg;
-          })
-        );
-      } else if (eventType === 'error' && eventData) {
-        console.error('[ModelSelectionChatView] SSE Error Event:', eventData);
-        try {
-          const errorData = JSON.parse(eventData);
-          throw new Error(errorData.detail || errorData.error || 'Unknown server error in stream');
-        } catch (e: any) {
-          throw new Error('Error in stream: ' + (e.message || eventData || 'Unknown error'));
+              return msg;
+            });
+          });
+        } else if (eventData.event === 'error') {
+          console.error('[ModelSelectionChatView] SSE Error Event:', eventData);
+          throw new Error(eventData.data.detail || eventData.data.error || 'Unknown server error in stream');
+        } else if (eventData.event === 'end_stream') {
+          console.log("[ModelSelectionChatView] Received end_stream from backend.");
         }
-      } else if (eventType === 'end_stream') {
-        console.log("[ModelSelectionChatView] Received end_stream from backend.");
+      } catch (e) {
+        console.error('[ModelSelectionChatView] Error processing event block:', e);
       }
     };
 
     try {
       const requestBody = {
         prompt: inputText,
-        possible_categories: categories,
+        model: "llama-3.3-70b-versatile",
         temperature: 0.7,
         top_p: 0.9,
         max_tokens: 300
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/models/select`, {
+      console.log('[ModelSelectionChatView] Sending request:', requestBody);
+      console.log('[ModelSelectionChatView] API URL:', `${API_BASE_URL}/api/generate`);
+
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -180,21 +174,28 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
         body: JSON.stringify(requestBody),
       });
 
+      console.log('[ModelSelectionChatView] Response status:', response.status);
+      console.log('[ModelSelectionChatView] Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('[ModelSelectionChatView] Error response:', errorText);
         throw new Error(`Server error: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       if (!response.body) {
+        console.error('[ModelSelectionChatView] Response body is null');
         throw new Error('Response body is null');
       }
 
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
-      const boundaryRegex = /(\r?\n){2}/; // Matches \n\n or \r\n\r\n
+
+      console.log('[ModelSelectionChatView] Starting to read stream');
 
       while (true) {
         const { value, done } = await reader.read();
+        console.log('[ModelSelectionChatView] Read chunk:', value);
 
         if (done) {
           console.log('[ModelSelectionChatView] Stream complete');
@@ -205,13 +206,12 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
         }
 
         buffer += value;
-        let match;
-        // Process buffer for complete event blocks
-        while ((match = buffer.match(boundaryRegex)) && match.index !== undefined) {
-          const eventBlock = buffer.substring(0, match.index);
-          buffer = buffer.substring(match.index + match[0].length);
-          if (eventBlock.trim()) {
-            processSseEventBlock(eventBlock, assistantId);
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
+
+        for (const line of lines) {
+          if (line.trim() && line.startsWith('data:')) {
+            processSseEventBlock(line, assistantId);
           }
         }
       }

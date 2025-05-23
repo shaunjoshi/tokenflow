@@ -197,116 +197,71 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
     let accumulatedText = '';
 
     try {
-      const token = (apiClient()?.defaults?.headers as any)?.Authorization?.split(' ')[1]; 
-      if (!token) throw new Error("Authentication token not found.");
+      const token = (apiClient()?.defaults?.headers as any)?.Authorization?.split(' ')[1];
+      if (!token) {
+        throw new Error('No authentication token available');
+      }
 
-      const requestBody = {
-        prompt: promptText,
-        model: modelId,
-        temperature: 0.7, // Or get from state if you add controls
-        top_p: 0.9,
-        max_tokens: 300, // Increase max_tokens if needed
-      };
-
-      console.log(`Starting generation stream for model: ${modelId}`);
-      const response = await fetch(`/api/generate`, { // Use relative path to avoid URL issues
+      console.log(`[PromptCompressionView] Sending request for model ${modelId}`);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
           'Accept': 'text/event-stream'
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          prompt: promptText,
+          model: modelId,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 1000
+        })
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
       }
+
       if (!response.body) {
-         throw new Error("Response body is null");
+        throw new Error('Response body is null');
       }
 
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-      readerRef.current = reader; // Store reader to allow cancellation
-
-      let buffer = '';
-      const boundaryRegex = /(\r?\n){2}/;
+      readerRef.current = reader;
 
       while (true) {
         const { value, done } = await reader.read();
+        if (done) break;
 
-        if (done) {
-          console.log("Stream finished.");
-           if (buffer.trim().length > 0) { // Process any remaining buffer
-             processSseBlock(buffer.trim(), setOutput, (text) => accumulatedText += text, setError);
-           }
-          break;
-        }
+        const lines = value.split('\n');
+        for (const line of lines) {
+          if (line.trim() && line.startsWith('data:')) {
+            try {
+              const eventData = JSON.parse(line.replace('data: ', ''));
+              console.log('[PromptCompressionView] Received event:', eventData);
 
-        buffer += value;
-        
-        while (true) {
-            const boundaryMatch = buffer.match(boundaryRegex);
-            if (!boundaryMatch || boundaryMatch.index === undefined) break;
-            
-            const boundaryIndex = boundaryMatch.index;
-            const boundaryLength = boundaryMatch[0].length;
-            const eventBlock = buffer.substring(0, boundaryIndex);
-            buffer = buffer.substring(boundaryIndex + boundaryLength);
-
-            processSseBlock(eventBlock, setOutput, (text) => accumulatedText += text, setError);
-            
-            // Yield slightly to allow UI updates if many blocks arrive quickly
-            await new Promise(resolve => setTimeout(resolve, 10));
+              if (eventData.event === 'text_chunk' && eventData.data) {
+                accumulatedText += eventData.data;
+                setOutput(accumulatedText);
+              } else if (eventData.event === 'error') {
+                throw new Error(eventData.data.detail || eventData.data.error || 'Unknown error');
+              }
+            } catch (e) {
+              console.error('[PromptCompressionView] Error processing event:', e);
+              setError(e instanceof Error ? e.message : 'Error processing stream');
+            }
+          }
         }
       }
-
     } catch (err: any) {
-      console.error("Generation stream error:", err);
-      setError(err.message || 'Failed to get streaming response');
+      console.error('[PromptCompressionView] Generation error:', err);
+      setError(err.message || 'Failed to generate text');
     } finally {
       setIsLoading(false);
-      readerRef.current = null; // Clear reader ref
+      readerRef.current = null;
     }
   }, [apiClient]);
-
-  // Helper to process individual SSE blocks during generation
-  const processSseBlock = (
-      block: string,
-      setOutput: React.Dispatch<React.SetStateAction<string>>,
-      accumulate: (text: string) => void,
-      setError: (error: string | null) => void
-    ) => {
-    let eventType = '';
-    let data = '';
-    const lines = block.split('\n');
-
-    for (const line of lines) {
-        if (line.startsWith('event:')) {
-            eventType = line.substring(6).trim();
-        } else if (line.startsWith('data:')) {
-            data += line.substring(5); // Append data lines if multiline
-        }
-    }
-
-    if (eventType === 'text_chunk' && data) {
-        setOutput(prev => prev + data);
-        accumulate(data); // Keep track internally if needed
-    } else if (eventType === 'end_stream') {
-        // Final cleanup could happen here if needed, similar to ModelSelectionChatView
-        // For now, just log completion
-        console.log("Received end_stream event from backend.");
-    } else if (eventType === 'error') {
-        try {
-            const errorData = JSON.parse(data);
-            setError(errorData.detail || errorData.error || 'Unknown backend error');
-        } catch (e) {
-            setError('Received unparsable error event from backend.');
-        }
-        console.error('SSE Error Event:', data);
-    }
-  };
 
   return (
     <Box sx={{ flexGrow: 1 }}>
