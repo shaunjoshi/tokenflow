@@ -1,22 +1,24 @@
 import os
+
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["TRANSFORMERS_FORCE_CPU"] = "1"
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ValidationError
-from typing import List, Dict, Optional
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-from llmlingua import PromptCompressor
-from dotenv import load_dotenv
-import logging
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
+import atexit
+import logging
 import signal
 import sys
-import atexit
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from typing import Dict, List, Optional
+
 import llmlingua
+import torch
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from llmlingua import PromptCompressor
+from pydantic import BaseModel, Field, ValidationError
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
 # Load environment variables
 load_dotenv()
@@ -69,7 +71,7 @@ def get_model():
         if model is None or tokenizer is None: # Should not happen if logic above is correct
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        
+
         bart_classifier = pipeline(
             "zero-shot-classification",
             model=model, # Use pre-loaded model
@@ -84,7 +86,7 @@ def get_compressor():
     global compressor
     if compressor is None:
         try:
-            model_to_use = "bert-base-multilingual-cased" 
+            model_to_use = "bert-base-multilingual-cased"
             logger.info(f"Initializing LLMLingua compressor with model: {model_to_use} and use_llmlingua2=True...")
             compressor = PromptCompressor(
                 model_name=model_to_use,
@@ -101,29 +103,29 @@ def cleanup_resources():
     """Cleanup function to be called on shutdown."""
     global model, tokenizer, compressor, thread_pool
     print("\nCleaning up resources...")
-    
+
     # Clear CUDA cache if available
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
+
     # Shutdown thread pool
     if thread_pool:
         thread_pool.shutdown(wait=False)
-    
+
     # Clear model references
     model = None
     tokenizer = None
     compressor = None
     thread_pool = None
-    
+
     print("Cleanup complete.")
 
 def initialize_models():
     """Initialize models and resources."""
     global model, tokenizer, compressor, thread_pool
-    
+
     logger.info("Starting model initialization...")
-    
+
     # Initialize BART model for classification
     try:
         logger.info("Loading BART model and tokenizer...")
@@ -191,7 +193,7 @@ async def classify_prompt(request: ClassificationRequest):
         logger.info("=== Starting classification request ===")
         logger.info(f"Received request with prompt: {request.prompt[:100]}...")
         logger.info(f"Possible categories: {request.possible_categories}")
-        
+
         # Get the zero-shot classification pipeline
         logger.info("Getting zero-shot classification pipeline...")
         _, _, classifier = get_model() # Model and tokenizer are also returned but not directly used here
@@ -199,12 +201,12 @@ async def classify_prompt(request: ClassificationRequest):
             logger.error("Failed to get zero-shot-classification pipeline.")
             raise HTTPException(status_code=503, detail="Classification service not available.")
         logger.info("Zero-shot classification pipeline obtained successfully")
-        
+
         # Perform classification
         logger.info("Performing zero-shot classification...")
         classification_result = classifier(
-            request.prompt, 
-            request.possible_categories, 
+            request.prompt,
+            request.possible_categories,
             multi_label=request.multi_label
         )
         logger.info(f"Classification result: {classification_result}")
@@ -253,7 +255,7 @@ async def compress_text(request: CompressionRequest):
 
         if len(request.text) > MAX_TEXT_LENGTH:
             raise HTTPException(status_code=400, detail=f"Text too long (max {MAX_TEXT_LENGTH} chars).")
-        
+
         logger.info("Getting compressor...")
         compressor = get_compressor() # Initialized with use_llmlingua2=True
         if compressor is None:
@@ -264,11 +266,11 @@ async def compress_text(request: CompressionRequest):
         logger.info("Preparing to call LLMLingua's compress_prompt with dynamic rate:")
         logger.info(f"  - Text (first 50 chars): '{request.text[:50]}...'")
         logger.info(f"  - Requested ratio: {request.ratio}")
-        
+
         # Parameters for LLMLingua - using request.ratio for the 'rate' parameter
         # The 'rate' in llmlingua's compress_prompt is actually the target ratio of compressed size / original size.
         compression_params = {
-            "rate": request.ratio, 
+            "rate": request.ratio,
         }
 
         logger.info(f"Keyword arguments for LLMLingua compress_prompt: {compression_params}")
@@ -284,7 +286,7 @@ async def compress_text(request: CompressionRequest):
         except Exception as e:
             logger.error(f"Error during compression: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error during compression: {str(e)}")
-        
+
         original_text = request.text
         compressed_prompt_value = result.get("compressed_prompt", "")
         if isinstance(compressed_prompt_value, list):
@@ -297,7 +299,7 @@ async def compress_text(request: CompressionRequest):
 
         original_tokens = result.get("origin_tokens", 0)
         compressed_tokens = result.get("compressed_tokens", 0)
-        
+
         # Calculate actual_ratio based on tokens
         actual_ratio = 0.0
         if original_tokens > 0 and compressed_tokens > 0:
@@ -307,7 +309,7 @@ async def compress_text(request: CompressionRequest):
         elif original_tokens > 0 and compressed_tokens == 0:
             actual_ratio = 0.0 # Full compression to 0 tokens
 
-        # The ratio returned by LLMLingua in its dict is origin/compressed. We are using compressed/origin. 
+        # The ratio returned by LLMLingua in its dict is origin/compressed. We are using compressed/origin.
         logger.info(f"Compression successful. Original: {original_tokens}, Compressed: {compressed_tokens}, Achieved Ratio (compressed/original): {actual_ratio:.2f}")
         logger.info(f"Original text (first 50): {original_text[:50]}...")
         logger.info(f"Compressed text (first 50): {compressed_text[:50]}...")
@@ -318,19 +320,19 @@ async def compress_text(request: CompressionRequest):
         # For now, let's stick to the existing CompressionResponse structure.
         # The llmlingua dict has 'ratio' (orig/comp) and 'rate' (comp/orig in %).
         # Our response has 'compression_ratio'. Let's align this to be achieved_ratio (compressed/original)
-        
+
         # Let's redefine compression_ratio in the response to be actual_ratio (compressed/original)
         # If a different definition (like llmlingua's 1/rate) is needed, this would change.
-        response_compression_ratio = actual_ratio 
+        response_compression_ratio = actual_ratio
 
         return CompressionResponse(
             original_text=original_text,
             compressed_text=compressed_text,
             original_tokens=original_tokens,
             compressed_tokens=compressed_tokens,
-            compression_ratio=response_compression_ratio 
+            compression_ratio=response_compression_ratio
         )
-        
+
     except ValidationError as e:
         logger.error(f"Validation error: {e}")
         raise HTTPException(status_code=422, detail=str(e))
@@ -346,18 +348,18 @@ async def health_check():
 def start():
     """Start the FastAPI application."""
     import uvicorn
-    
+
     try:
         logger.info("Starting TokenFlow backend...")
-        
+
         # Create thread pool
         global thread_pool
         thread_pool = ThreadPoolExecutor(max_workers=1)
         logger.info("Thread pool initialized")
-        
+
         # Register cleanup handler
         atexit.register(cleanup_resources)
-        
+
         logger.info("Starting FastAPI server...")
         # Start the server
         uvicorn.run(
@@ -371,4 +373,4 @@ def start():
         sys.exit(1)
 
 if __name__ == "__main__":
-    start() 
+    start()
