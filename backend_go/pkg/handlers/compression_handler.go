@@ -13,9 +13,9 @@ type CompressionHandler struct {
 	compressionService *services.CompressionService
 }
 
-func NewCompressionHandler() *CompressionHandler {
+func NewCompressionHandler(compressionService *services.CompressionService) *CompressionHandler {
 	return &CompressionHandler{
-		compressionService: services.NewCompressionService(),
+		compressionService: compressionService,
 	}
 }
 

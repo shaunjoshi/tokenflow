@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// Initialize services
-	modelService := services.NewModelService()
+	classificationService := services.NewClassificationService()
 	compressionService := services.NewCompressionService()
 
 	// Test classification
@@ -16,7 +16,7 @@ func main() {
 	prompt := "Write a function to calculate the fibonacci sequence"
 	categories := []string{"reasoning", "function-calling", "text-to-text"}
 
-	classification, err := modelService.ClassifyPrompt(prompt, categories)
+	classification, err := classificationService.ClassifyPrompt(prompt, categories, false)
 	if err != nil {
 		log.Fatalf("Classification error: %v", err)
 	}
@@ -29,9 +29,9 @@ func main() {
 	// Test compression
 	fmt.Println("\nTesting Compression:")
 	text := "This is a test text that needs to be compressed. It contains multiple sentences and should be reduced to a smaller size while maintaining the main meaning."
-	targetTokens := 10
+	ratio := 0.3
 
-	compression, err := compressionService.CompressText(text, targetTokens)
+	compression, err := compressionService.CompressText(text, ratio)
 	if err != nil {
 		log.Fatalf("Compression error: %v", err)
 	}

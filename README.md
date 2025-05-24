@@ -4,7 +4,7 @@ A hybrid Go + Python backend system for intelligent prompt compression and LLM g
 
 ## Architecture Overview
 
-TokenFlow uses a **polyglot microservice architecture** that leverages the strengths of both Go and Python:
+TokenFlow uses a **multilanguage microservice architecture** that leverages the strengths of both Go and Python:
 
 - **Go Backend**: High-performance HTTP server acting as the main API gateway and orchestrator
 - **Python Backend**: Specialized ML model server for prompt compression and classification
@@ -12,7 +12,7 @@ TokenFlow uses a **polyglot microservice architecture** that leverages the stren
 
 ## System Architecture
 
-# add link to TokenFlow.jpg     
+![TokenFlow Architecture](TokenFlow.png)
 
 ## Key Design Patterns
 

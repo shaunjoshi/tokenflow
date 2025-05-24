@@ -29,11 +29,10 @@ app = FastAPI()
 origins = [
     "http://localhost:3000",
     "http://192.168.4.206:3000",
-    "http://192.168.5.209:3000",  # Add your local network IP
+    "http://192.168.5.209:3000",  
     "http://localhost:8001",
-    "http://192.168.5.209:8001",  # Add Python backend IP
+    "http://192.168.5.209:8001",
     # Add production frontend URL here
-    # "https://your-deployed-app.com",
 ]
 app.add_middleware(
     CORSMiddleware,

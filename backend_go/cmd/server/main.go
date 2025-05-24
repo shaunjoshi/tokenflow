@@ -28,7 +28,7 @@ func main() {
 		AllowOrigins: []string{
 			"http://localhost:3000",
 			"http://192.168.4.206:3000",
-			"http://192.168.5.209:3000", // Add your local network IP
+			"http://192.168.5.209:3000",
 		},
 		AllowMethods:     []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
 		AllowHeaders:     []string{"Authorization", "Content-Type", "Origin", "Accept"},
@@ -39,13 +39,13 @@ func main() {
 	log.Println("Initializing services...")
 	modelService := services.NewModelService()
 	classificationService := services.NewClassificationService()
-	// compressionService is instantiated directly by its handler, which is fine for now
+	compressionService := services.NewCompressionService()
 	log.Println("Services initialized.")
 
 	// Initialize handlers, injecting services
 	log.Println("Initializing handlers...")
 	modelHandler := handlers.NewModelHandler(modelService, classificationService)
-	compressionHandler := handlers.NewCompressionHandler()
+	compressionHandler := handlers.NewCompressionHandler(compressionService)
 	classificationHandler := handlers.NewClassificationHandler(classificationService)
 	log.Println("Handlers initialized.")
 
