@@ -88,7 +88,7 @@ var ModelRankings = map[string]struct {
 			Name    string `json:"name"`
 			Primary bool   `json:"primary"`
 		}{
-			{ID: "llama-3.3-70b-versatile", Name: "Llama 3.3 70B", Primary: true},
+			{ID: "qwen-qwq-32b", Name: "QWEN QWQ 32B", Primary: true},
 			{ID: "llama-3.1-8b-instant", Name: "Llama 3.1 8B", Primary: false},
 		},
 	},
