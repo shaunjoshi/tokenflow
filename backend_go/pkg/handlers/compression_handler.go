@@ -27,10 +27,10 @@ func (h *CompressionHandler) CompressText(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Received compression request: text=%s, targetToken=%d\n", req.Text, req.TargetToken)
+	fmt.Printf("Received compression request: text=%s, ratio=%.2f\n", req.Text, req.Ratio)
 
 	// Compress the text
-	result, err := h.compressionService.CompressText(req.Text, req.TargetToken)
+	result, err := h.compressionService.CompressText(req.Text, req.Ratio)
 	if err != nil {
 		fmt.Printf("Error compressing text: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

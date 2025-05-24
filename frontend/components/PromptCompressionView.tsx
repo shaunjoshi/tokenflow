@@ -60,7 +60,7 @@ interface ParsedDiffFile {
 const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient }) => {
   // --- State for Compression ---
   const [inputText, setInputText] = useState<string>('');
-  const [targetTokens, setTargetTokens] = useState<number>(100);
+  const [compressionRatio, setCompressionRatio] = useState<number>(0.5);
   const [isCompressing, setIsCompressing] = useState<boolean>(false);
   const [compressionError, setCompressionError] = useState<string | null>(null);
   const [compressionResult, setCompressionResult] = useState<CompressionResult | null>(null);
@@ -158,10 +158,10 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
     setShowDiff(false);
 
     try {
-      console.log(`Sending text for compression. Target tokens: ${targetTokens}`);
+      console.log(`Sending text for compression. Target ratio: ${compressionRatio}`);
       const response = await client.post<CompressionResult>('/api/compress', {
         text: inputText,
-        target_token: targetTokens,
+        ratio: compressionRatio,
       });
       console.log("Compression response received:", response.data);
       setCompressionResult(response.data);
@@ -172,7 +172,7 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
     } finally {
       setIsCompressing(false);
     }
-  }, [apiClient, inputText, targetTokens]);
+  }, [apiClient, inputText, compressionRatio]);
 
   // --- Generation Logic (Handles SSE Stream) ---
   const handleGenerate = useCallback(async (
@@ -290,16 +290,16 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
             />
           </Grid>
           <Grid item xs={12} md={6}>
-             <Typography gutterBottom id="target-tokens-slider-label">Target Tokens (approximate)</Typography>
+             <Typography gutterBottom id="compression-ratio-slider-label">Compression Ratio (target)</Typography>
              <Slider
-               value={targetTokens}
-               onChange={(event, newValue) => setTargetTokens(newValue as number)}
-               aria-labelledby="target-tokens-slider-label"
+               value={compressionRatio}
+               onChange={(event, newValue) => setCompressionRatio(newValue as number)}
+               aria-labelledby="compression-ratio-slider-label"
                valueLabelDisplay="auto"
-               step={10}
+               step={0.05}
                marks
-               min={10}
-               max={500}
+               min={0.1}
+               max={1.0}
                disabled={isCompressing}
              />
           </Grid>
@@ -404,7 +404,7 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
               <Card variant="outlined" sx={{ height: '100%' }}> {/* Wrap in Card */}
                 <CardContent>
                   <Typography variant="subtitle1" gutterBottom>
-                     Compressed Prompt ({compressionResult.compressed_tokens} tokens, Ratio: {compressionResult.compression_ratio.toFixed(2)}:1)
+                     Compressed Prompt ({compressionResult.compressed_tokens} tokens, Achieved Ratio: {compressionResult.compression_ratio.toFixed(2)})
                    </Typography>
                    <Paper variant="outlined" sx={{ p: 2, mb: 2, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap', backgroundColor: theme.palette.primary.light }}> 
                      {compressionResult.compressed_text}

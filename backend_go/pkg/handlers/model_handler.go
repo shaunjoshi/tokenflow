@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+
 	"tokenflow/pkg/models"
 	"tokenflow/pkg/services"
 
@@ -112,33 +114,50 @@ func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 }
 
 func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
+	// Set SSE headers
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// Create channels for streaming
+	done := make(chan bool)
+	streamChan := make(chan interface{})
+	errorChan := make(chan error)
+
+	// Get request body
 	var req models.GenerateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("Failed to bind JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Set up SSE headers
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
+	// First, classify the prompt
+	log.Printf("Classifying prompt: %s", req.Prompt)
+	classification, err := h.modelService.ClassifyPrompt(req.Prompt, models.DefaultModelCategories)
+	if err != nil {
+		log.Printf("Failed to classify prompt: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to classify prompt: %v", err)})
+		return
+	}
 
-	// Create a channel for streaming
-	streamChan := make(chan interface{})
-	errorChan := make(chan error)
+	log.Printf("Classification successful - top category: %s, confidence: %f",
+		classification.TopCategory,
+		classification.ConfidenceScore)
 
-	// Start the generation process in a goroutine
+	// Start generation in a goroutine
 	go func() {
 		defer close(streamChan)
 		defer close(errorChan)
+		defer close(done)
 
-		// Send metadata event
+		// Send metadata event using the classifier output
 		metadata := map[string]interface{}{
-			"prompt_category":  "text-to-text",
-			"confidence_score": 1.0,
+			"prompt_category":  classification.TopCategory,
+			"confidence_score": classification.ConfidenceScore,
 			"selected_model":   req.Model,
-			"all_categories":   map[string]float64{"text-to-text": 1.0},
+			"all_categories":   classification.AllCategories,
 		}
 		streamChan <- map[string]interface{}{
 			"event": "metadata",
@@ -155,6 +174,7 @@ func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 			streamChan,
 		)
 		if err != nil {
+			log.Printf("Error in StreamCompletion: %v", err)
 			errorChan <- err
 			return
 		}
@@ -164,37 +184,39 @@ func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 			"event": "end_stream",
 			"data":  "Stream finished",
 		}
+		done <- true
 	}()
 
-	// Stream the results to the client
+	// Stream results to client
 	c.Stream(func(w io.Writer) bool {
 		select {
-		case data, ok := <-streamChan:
-			if !ok {
-				return false
-			}
-			eventData, _ := json.Marshal(data)
-			// Send the event with the correct SSE format
-			fmt.Fprintf(w, "data: %s\n\n", eventData)
-			w.(http.Flusher).Flush()
-			return true
 		case err := <-errorChan:
-			var detail string
-			if err != nil {
-				detail = err.Error()
-			} else {
-				detail = "Unknown error"
-			}
+			log.Printf("Error received from errorChan: %v", err)
 			errorData := map[string]interface{}{
 				"event": "error",
 				"data": map[string]string{
 					"error":  "An error occurred during generation",
-					"detail": detail,
+					"detail": err.Error(),
 				},
 			}
 			eventData, _ := json.Marshal(errorData)
 			fmt.Fprintf(w, "data: %s\n\n", eventData)
 			w.(http.Flusher).Flush()
+			return false
+		case data, ok := <-streamChan:
+			if !ok {
+				return false
+			}
+			log.Printf("Sending message to client: %v", data)
+			eventData, _ := json.Marshal(data)
+			fmt.Fprintf(w, "data: %s\n\n", eventData)
+			w.(http.Flusher).Flush()
+			return true
+		case <-done:
+			log.Printf("Generation completed")
+			return false
+		case <-c.Request.Context().Done():
+			log.Printf("Client disconnected")
 			return false
 		}
 	})

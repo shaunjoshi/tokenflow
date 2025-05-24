@@ -17,14 +17,14 @@ func NewCompressionService() *CompressionService {
 	return &CompressionService{}
 }
 
-func (s *CompressionService) CompressText(text string, targetToken int) (*models.CompressionResponse, error) {
+func (s *CompressionService) CompressText(text string, ratio float64) (*models.CompressionResponse, error) {
 	// Create a proper JSON request body
 	requestBody := struct {
-		Text        string `json:"text"`
-		TargetToken int    `json:"target_token"`
+		Text  string  `json:"text"`
+		Ratio float64 `json:"ratio"`
 	}{
-		Text:        text,
-		TargetToken: targetToken,
+		Text:  text,
+		Ratio: ratio,
 	}
 
 	jsonData, err := json.Marshal(requestBody)
@@ -46,6 +46,13 @@ func (s *CompressionService) CompressText(text string, targetToken int) (*models
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		// Try to parse the error from Python service if it's JSON
+		var pyErrorDetail struct {
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal(body, &pyErrorDetail) == nil && pyErrorDetail.Detail != "" {
+			return nil, fmt.Errorf("compression service error (status %d): %s", resp.StatusCode, pyErrorDetail.Detail)
+		}
 		return nil, fmt.Errorf("compression service error (status %d): %s", resp.StatusCode, string(body))
 	}
 
