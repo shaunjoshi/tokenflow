@@ -28,7 +28,6 @@ func (h *ClassificationHandler) ClassifyPrompt(c *gin.Context) {
 		return
 	}
 
-	// Use default categories if none provided by the client
 	if len(req.PossibleCategories) == 0 {
 		log.Printf("ClassificationHandler: No categories provided, using default categories.")
 		req.PossibleCategories = models.DefaultModelCategories
@@ -36,12 +35,9 @@ func (h *ClassificationHandler) ClassifyPrompt(c *gin.Context) {
 
 	log.Printf("ClassificationHandler: Received classification request. Prompt (first 50): %s... Categories: %v", req.Prompt[:min(len(req.Prompt), 50)], req.PossibleCategories)
 
-	// Call the ClassificationService
-	// The multiLabel flag is taken from the request, defaulting to false if not provided.
 	classification, err := h.classificationService.ClassifyPrompt(req.Prompt, req.PossibleCategories, req.MultiLabel)
 	if err != nil {
 		log.Printf("ClassificationHandler: Error from ClassificationService: %v", err)
-		// Attempt to return a more specific error message if it came from the Python service
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to classify prompt: %v", err)})
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
 	"tokenflow/pkg/models"
@@ -25,224 +24,185 @@ func NewModelHandler(modelService *services.ModelService, classService *services
 	}
 }
 
+// SSE Protocol: Browser opens persistent connection, server pushes data as it becomes available
+func (h *ModelHandler) setupSSEHeaders(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream") // Tells browser: "expect streaming text/event-stream format"
+	c.Header("Cache-Control", "no-cache")         // Prevents proxies/browsers from caching stream data
+	c.Header("Connection", "keep-alive")          // HTTP/1.1: keep connection open for multiple messages
+}
+
+// Browser receives: "data: {json}\n\ndata: {json}\n\n..." in real-time
+func (h *ModelHandler) streamResponse(c *gin.Context, streamChan <-chan interface{}, errorChan <-chan error) {
+	c.Stream(func(w io.Writer) bool {
+		// Go's select statement enables concurrent event handling - key to SSE efficiency
+		select {
+
+		// Case 1: New data arrives from LLM (e.g., token "Hello", "world", "!")
+		case data, ok := <-streamChan:
+			if !ok {
+				return false // Channel closed = end of stream
+			}
+
+			// SSE Message Format: Each message must be prefixed with "data: "
+			// Browser JS receives: addEventListener('message', (event) => console.log(event.data))
+			eventData, _ := json.Marshal(data)
+			fmt.Fprintf(w, "data: %s\n\n", eventData) // "\n\n" signals end of message
+
+			// Critical: Flush immediately sends bytes to browser (no buffering)
+			// Without flush, browser waits for full response = no real-time streaming
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush() // Forces TCP packet to browser immediately
+			}
+			return true // Keep streaming connection alive
+
+		// Case 2: Error occurred (network, API, parsing, etc.)
+		case err := <-errorChan:
+			if err != nil {
+				// Send error as SSE event - browser can handle gracefully
+				errorData := map[string]interface{}{
+					"event": "error", // Browser can filter: addEventListener('error', handler)
+					"data":  map[string]string{"error": "Stream error", "detail": err.Error()},
+				}
+				eventData, _ := json.Marshal(errorData)
+				fmt.Fprintf(w, "data: %s\n\n", eventData)
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
+			return false // Close SSE connection on error
+
+		// Case 3: Browser closed tab/navigated away
+		case <-c.Request.Context().Done():
+			// Context cancellation prevents goroutine leaks when client disconnects
+			return false // Clean shutdown
+		}
+	})
+}
+
+// getCategories returns categories to use for classification
+func (h *ModelHandler) getCategories(provided []string) []string {
+	if len(provided) == 0 {
+		return models.DefaultModelCategories
+	}
+	return provided
+}
+
+// createMetadata creates metadata for streaming
+func (h *ModelHandler) createMetadata(classification *models.ClassificationResponse, selectedModel string) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"selected_model": selectedModel,
+	}
+
+	if classification != nil {
+		metadata["prompt_category"] = classification.TopCategory
+		metadata["confidence_score"] = classification.ConfidenceScore
+		metadata["all_categories"] = classification.AllCategories
+	} else {
+		metadata["prompt_category"] = "unknown"
+		metadata["confidence_score"] = 0.0
+		metadata["all_categories"] = map[string]float64{}
+	}
+
+	return metadata
+}
+
 func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 	var req models.ModelSelectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("ModelHandler: Error binding JSON for /models/select: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	log.Printf("ModelHandler: /models/select request. Prompt (first 50): %s...", req.Prompt[:min(len(req.Prompt), 50)])
+	// Step 1: Setup SSE connection - browser now expects streaming data
+	h.setupSSEHeaders(c)
 
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
+	// Step 2: Create Go channels for inter-goroutine communication
+	// This enables: Main goroutine (SSE) + Background goroutine (LLM processing)
+	streamChan := make(chan interface{}) // Data pipeline: LLM → Browser
+	errorChan := make(chan error)        // Error pipeline: Any error → Browser
 
-	streamChan := make(chan interface{})
-	errorChan := make(chan error)
-
+	// Step 3: Background processing in separate goroutine
+	// Why goroutine? Prevents blocking HTTP response while waiting for LLM
 	go func() {
-		defer close(streamChan)
-		defer close(errorChan)
+		defer close(streamChan) // Signal: no more data coming
+		defer close(errorChan)  // Signal: no more errors coming
 
-		// Classify the prompt using the injected ClassificationService
-		categoriesToUse := req.PossibleCategories
-		if len(categoriesToUse) == 0 {
-			categoriesToUse = models.DefaultModelCategories
-		}
-		log.Printf("ModelHandler: Classifying prompt for model selection...")
-		// Assuming multiLabel is false for this flow, or it could be part of ModelSelectionRequest
-		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, categoriesToUse, false)
+		// Classify and select model
+		categories := h.getCategories(req.PossibleCategories)
+		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, categories, false)
 		if err != nil {
-			log.Printf("ModelHandler: Error classifying prompt for model selection: %v", err)
-			errorChan <- fmt.Errorf("failed to classify prompt for model selection: %v", err)
+			errorChan <- fmt.Errorf("classification failed: %v", err)
 			return
 		}
-		log.Printf("ModelHandler: Classification for model selection successful. Top category: %s", classification.TopCategory)
 
-		// Select model based on category (this method is in ModelService)
-		selectedModelID := h.modelService.SelectModelForCategory(classification.TopCategory)
-		log.Printf("ModelHandler: Selected model based on category '%s': %s", classification.TopCategory, selectedModelID)
+		selectedModel := h.modelService.SelectModelForCategory(classification.TopCategory)
 
-		metadata := map[string]interface{}{
-			"prompt_category":  classification.TopCategory,
-			"confidence_score": classification.ConfidenceScore,
-			"selected_model":   selectedModelID, // Use dynamically selected model
-			"all_categories":   classification.AllCategories,
-		}
+		// SSE Event 1: Send metadata immediately (user sees which model was selected)
+		// Browser receives: data: {"event": "metadata", "data": {"selected_model": "llama-3.3-70b"}}
+		metadata := h.createMetadata(classification, selectedModel)
 		streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
 
-		log.Printf("ModelHandler: Streaming completion from selected model: %s", selectedModelID)
-		err = h.modelService.StreamCompletion(
-			req.Prompt,
-			selectedModelID, // Use the model selected based on classification
-			req.Temperature,
-			req.TopP,
-			req.MaxTokens,
-			streamChan,
-		)
+		// SSE Event 2-N: Stream LLM tokens as they arrive from Groq API
+		// Browser receives: data: {"event": "text_chunk", "data": "Hello"}
+		//                  data: {"event": "text_chunk", "data": " world"}
+		//                  data: {"event": "text_chunk", "data": "!"}
+		err = h.modelService.StreamCompletion(req.Prompt, selectedModel, req.Temperature, req.TopP, req.MaxTokens, streamChan)
 		if err != nil {
-			log.Printf("ModelHandler: Error during StreamCompletion for model selection: %v", err)
-			errorChan <- fmt.Errorf("streaming completion failed: %v", err)
-			return
-		}
-		streamChan <- map[string]interface{}{"event": "end_stream", "data": "Stream finished"}
-	}()
-
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case data, ok := <-streamChan:
-			if !ok {
-				return false
-			}
-			eventData, _ := json.Marshal(data)
-			fmt.Fprintf(w, "data: %s\n\n", eventData)
-			// if flusher, ok := w.(http.Flusher); ok { flusher.Flush() } // Ensure type assertion is safe
-			if flusher, okAssert := w.(http.Flusher); okAssert {
-				flusher.Flush()
-			}
-			return true
-		case err := <-errorChan:
-			log.Printf("ModelHandler: Error in stream (model selection): %v", err)
-			errorData := map[string]interface{}{
-				"event": "error",
-				"data":  map[string]string{"error": "Error during model selection stream", "detail": err.Error()},
-			}
-			eventData, _ := json.Marshal(errorData)
-			fmt.Fprintf(w, "data: %s\n\n", eventData)
-			// if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
-			if flusher, okAssert := w.(http.Flusher); okAssert {
-				flusher.Flush()
-			}
-			return false
-		case <-c.Request.Context().Done():
-			log.Printf("ModelHandler: Client disconnected during model selection stream.")
-			return false
-		}
-	})
-}
-
-func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*") // Consider making this more restrictive
-
-	done := make(chan bool)
-	streamChan := make(chan interface{})
-	errorChan := make(chan error)
-
-	var req models.GenerateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("ModelHandler: Failed to bind JSON for /generate: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
-		return
-	}
-
-	log.Printf("ModelHandler: /generate request. Prompt (first 50): %s... Model: %s", req.Prompt[:min(len(req.Prompt), 50)], req.Model)
-
-	go func() {
-		defer close(streamChan)
-		defer close(errorChan)
-		defer close(done)
-
-		// Classify the prompt first to send as metadata
-		log.Printf("ModelHandler: Classifying prompt for metadata (direct generation)...")
-		// Assuming multiLabel is false for this metadata classification, or it could be part of GenerateRequest
-		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, models.DefaultModelCategories, false)
-		if err != nil {
-			log.Printf("ModelHandler: Failed to classify prompt for metadata: %v. Proceeding without classification metadata.", err)
-			// Don't block generation if classification for metadata fails; just log it and proceed.
-			// Send a simplified metadata or error event for metadata part.
-			metadata := map[string]interface{}{
-				"prompt_category":  "unknown",
-				"confidence_score": 0.0,
-				"selected_model":   req.Model,
-				"all_categories":   map[string]float64{},
-				"metadata_error":   "classification failed: " + err.Error(),
-			}
-			streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
-		} else {
-			log.Printf("ModelHandler: Classification for metadata successful. Top category: %s", classification.TopCategory)
-			metadata := map[string]interface{}{
-				"prompt_category":  classification.TopCategory,
-				"confidence_score": classification.ConfidenceScore,
-				"selected_model":   req.Model, // Model is directly requested by user
-				"all_categories":   classification.AllCategories,
-			}
-			streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
-		}
-
-		log.Printf("ModelHandler: Streaming completion from requested model: %s", req.Model)
-		err = h.modelService.StreamCompletion(
-			req.Prompt,
-			req.Model,
-			req.Temperature,
-			req.TopP,
-			req.MaxTokens,
-			streamChan,
-		)
-		if err != nil {
-			log.Printf("ModelHandler: Error in StreamCompletion for direct generation: %v", err)
 			errorChan <- err
 			return
 		}
+
+		// SSE Final Event: Signal completion
+		// Browser receives: data: {"event": "end_stream", "data": "Stream finished"}
 		streamChan <- map[string]interface{}{"event": "end_stream", "data": "Stream finished"}
-		done <- true
 	}()
 
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case err := <-errorChan:
-			log.Printf("ModelHandler: Error in stream (direct generation): %v", err)
-			detail := "An error occurred during generation"
-			if err != nil { // Ensure err is not nil before calling Error()
-				detail = err.Error()
-			}
-			errorData := map[string]interface{}{
-				"event": "error",
-				"data":  map[string]string{"error": "Generation stream error", "detail": detail},
-			}
-			eventData, _ := json.Marshal(errorData)
-			fmt.Fprintf(w, "data: %s\n\n", eventData)
-			// if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
-			if flusher, okAssert := w.(http.Flusher); okAssert {
-				flusher.Flush()
-			}
-			return false
-		case data, ok := <-streamChan:
-			if !ok {
-				return false
-			}
-			// log.Printf("ModelHandler: Sending message to client (direct generation): %v", data) // Can be too verbose
-			eventData, _ := json.Marshal(data)
-			fmt.Fprintf(w, "data: %s\n\n", eventData)
-			// if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
-			if flusher, okAssert := w.(http.Flusher); okAssert {
-				flusher.Flush()
-			}
-			return true
-		case <-done:
-			log.Printf("ModelHandler: Generation completed (direct generation).")
-			return false
-		case <-c.Request.Context().Done():
-			log.Printf("ModelHandler: Client disconnected during direct generation stream.")
-			return false
+	// Step 4: Handle SSE streaming using Go's concurrent select pattern
+	// This simultaneously listens for: data, errors, client disconnection
+	h.streamResponse(c, streamChan, errorChan)
+}
+
+func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
+	var req models.GenerateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// SSE Demo: Same pattern as above but with user-specified model
+	h.setupSSEHeaders(c)
+	streamChan := make(chan interface{})
+	errorChan := make(chan error)
+
+	// Background goroutine handles LLM communication while SSE streams to browser
+	go func() {
+		defer close(streamChan)
+		defer close(errorChan)
+
+		// Optional classification for metadata
+		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, models.DefaultModelCategories, false)
+		if err != nil {
+			classification = nil // Handle gracefully - don't block generation
 		}
-	})
+
+		// SSE Flow: metadata → token stream → end signal
+		metadata := h.createMetadata(classification, req.Model)
+		streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
+
+		// Real-time token streaming: each token sent immediately as generated
+		err = h.modelService.StreamCompletion(req.Prompt, req.Model, req.Temperature, req.TopP, req.MaxTokens, streamChan)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+
+		streamChan <- map[string]interface{}{"event": "end_stream", "data": "Stream finished"}
+	}()
+
+	// Demonstrate SSE handling with concurrent channel operations
+	h.streamResponse(c, streamChan, errorChan)
 }
 
 func (h *ModelHandler) GetModelRankings(c *gin.Context) {
-	log.Printf("ModelHandler: Serving /model-rankings request.")
 	c.JSON(http.StatusOK, models.ModelRankings)
 }
-
-// Helper function min removed as it's duplicative or should be in a utils package
-// func min(a, b int) int {
-//     if a < b {
-//         return a
-//     }
-//     return b
-// }
