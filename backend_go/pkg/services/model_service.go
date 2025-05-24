@@ -1,13 +1,9 @@
 package services
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"tokenflow/pkg/config"
 	"tokenflow/pkg/models"
 
@@ -22,53 +18,17 @@ type ModelService struct {
 func NewModelService() *ModelService {
 	openRouterClient := openai.NewClient(config.AppConfig.OpenRouterAPIKey)
 
-	// Initialize Groq client with the correct configuration
+	// Initialize Groq client
 	groqConfig := openai.DefaultConfig(config.AppConfig.GroqAPIKey)
-	groqConfig.BaseURL = "https://api.groq.com/openai/v1"
-	log.Printf("Initializing Groq client with base URL: %s", groqConfig.BaseURL)
+	groqConfig.BaseURL = config.AppConfig.GroqBaseURL
 	groqClient := openai.NewClientWithConfig(groqConfig)
+
+	log.Printf("ModelService: Initialized with Groq base URL: %s", groqConfig.BaseURL)
 
 	return &ModelService{
 		openRouterClient: openRouterClient,
 		groqClient:       groqClient,
 	}
-}
-
-func (s *ModelService) ClassifyPrompt(prompt string, categories []string) (*models.ClassificationResponse, error) {
-	// Create request body
-	requestBody := map[string]interface{}{
-		"prompt":              prompt,
-		"possible_categories": categories,
-		"multi_label":         false,
-	}
-
-	jsonBody, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %v", err)
-	}
-
-	// Call Python BART service
-	resp, err := http.Post(
-		"http://localhost:8001/classify",
-		"application/json",
-		bytes.NewBuffer(jsonBody),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call classification service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("classification service error: %s", string(body))
-	}
-
-	var result models.ClassificationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode classification response: %v", err)
-	}
-
-	return &result, nil
 }
 
 func (s *ModelService) StreamCompletion(
@@ -79,7 +39,6 @@ func (s *ModelService) StreamCompletion(
 	maxTokens int,
 	streamChan chan<- interface{},
 ) error {
-	// Use Groq client for streaming
 	req := openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
@@ -89,10 +48,8 @@ func (s *ModelService) StreamCompletion(
 		Stream:      true,
 	}
 
-	log.Printf("Sending request to Groq API with model: %s", model)
 	stream, err := s.groqClient.CreateChatCompletionStream(context.Background(), req)
 	if err != nil {
-		log.Printf("Error creating chat completion stream: %v", err)
 		return fmt.Errorf("failed to create chat completion stream: %v", err)
 	}
 	defer stream.Close()
@@ -100,10 +57,9 @@ func (s *ModelService) StreamCompletion(
 	for {
 		response, err := stream.Recv()
 		if err != nil {
-			if err.Error() == "EOF" {
+			if err == context.Canceled || err.Error() == "EOF" {
 				break
 			}
-			log.Printf("Error receiving stream: %v", err)
 			return fmt.Errorf("error receiving stream: %v", err)
 		}
 
