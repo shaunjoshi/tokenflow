@@ -1,9 +1,13 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"tokenflow/pkg/config"
 	"tokenflow/pkg/models"
 
@@ -31,14 +35,40 @@ func NewModelService() *ModelService {
 }
 
 func (s *ModelService) ClassifyPrompt(prompt string, categories []string) (*models.ClassificationResponse, error) {
-	// TODO: Implement BART classification
-	// For now, return a mock response
-	return &models.ClassificationResponse{
-		TopCategory:      "reasoning",
-		ConfidenceScore:  0.95,
-		AllCategories:    map[string]float64{"reasoning": 0.95},
-		RecommendedModel: "llama-3.3-70b-versatile",
-	}, nil
+	// Create request body
+	requestBody := map[string]interface{}{
+		"prompt":              prompt,
+		"possible_categories": categories,
+		"multi_label":         false,
+	}
+
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	// Call Python BART service
+	resp, err := http.Post(
+		"http://localhost:8001/classify",
+		"application/json",
+		bytes.NewBuffer(jsonBody),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call classification service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("classification service error: %s", string(body))
+	}
+
+	var result models.ClassificationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode classification response: %v", err)
+	}
+
+	return &result, nil
 }
 
 func (s *ModelService) StreamCompletion(

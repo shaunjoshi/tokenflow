@@ -203,7 +203,8 @@ const PromptCompressionView: React.FC<PromptCompressionViewProps> = ({ apiClient
       }
 
       console.log(`[PromptCompressionView] Sending request for model ${modelId}`);
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/generate`, {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '');
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

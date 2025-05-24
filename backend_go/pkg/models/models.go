@@ -36,7 +36,7 @@ type ClassificationResponse struct {
 // CompressionRequest represents the request for text compression
 type CompressionRequest struct {
 	Text        string `json:"text" binding:"required"`
-	TargetToken int    `json:"target_token"`
+	TargetToken int    `json:"target_token" binding:"required"`
 }
 
 // CompressionResponse represents the response for text compression

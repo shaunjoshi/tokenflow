@@ -24,9 +24,13 @@ func main() {
 
 	// Configure CORS
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://192.168.4.206:3000"},
-		AllowMethods:     []string{"GET", "POST"},
-		AllowHeaders:     []string{"Authorization", "Content-Type"},
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://192.168.4.206:3000",
+			"http://192.168.5.209:3000", // Add your local network IP
+		},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Authorization", "Content-Type", "Origin", "Accept"},
 		AllowCredentials: true,
 	}))
 

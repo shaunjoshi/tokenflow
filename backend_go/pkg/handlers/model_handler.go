@@ -179,11 +179,17 @@ func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 			w.(http.Flusher).Flush()
 			return true
 		case err := <-errorChan:
+			var detail string
+			if err != nil {
+				detail = err.Error()
+			} else {
+				detail = "Unknown error"
+			}
 			errorData := map[string]interface{}{
 				"event": "error",
 				"data": map[string]string{
 					"error":  "An error occurred during generation",
-					"detail": err.Error(),
+					"detail": detail,
 				},
 			}
 			eventData, _ := json.Marshal(errorData)

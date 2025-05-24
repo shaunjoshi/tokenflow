@@ -1,11 +1,16 @@
 package services
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"tokenflow/pkg/models"
 )
 
 type CompressionService struct {
-	// TODO: Add LLMLingua client when available
+	// No client needed as we're using HTTP directly
 }
 
 func NewCompressionService() *CompressionService {
@@ -13,13 +18,41 @@ func NewCompressionService() *CompressionService {
 }
 
 func (s *CompressionService) CompressText(text string, targetToken int) (*models.CompressionResponse, error) {
-	// TODO: Implement LLMLingua compression
-	// For now, return a mock response
-	return &models.CompressionResponse{
-		OriginalText:     text,
-		CompressedText:   text,          // No compression for now
-		OriginalTokens:   len(text) / 4, // Rough estimate
-		CompressedTokens: len(text) / 4, // Same as original for now
-		CompressionRatio: 1.0,
-	}, nil
+	// Create a proper JSON request body
+	requestBody := struct {
+		Text        string `json:"text"`
+		TargetToken int    `json:"target_token"`
+	}{
+		Text:        text,
+		TargetToken: targetToken,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	fmt.Printf("Sending request to Python service: %s\n", string(jsonData))
+
+	resp, err := http.Post(
+		"http://localhost:8001/compress",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call compression service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("compression service error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result models.CompressionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode compression response: %v", err)
+	}
+
+	return &result, nil
 }
