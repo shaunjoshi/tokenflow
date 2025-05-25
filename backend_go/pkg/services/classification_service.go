@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"tokenflow/pkg/config"
 	"tokenflow/pkg/models"
 )
 
@@ -29,7 +30,7 @@ func (s *ClassificationService) ClassifyPrompt(prompt string, categories []strin
 	}
 
 	resp, err := http.Post(
-		"http://localhost:8001/classify",
+		config.AppConfig.PythonServiceURL+"/classify",
 		"application/json",
 		bytes.NewBuffer(jsonBody),
 	)

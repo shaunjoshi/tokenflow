@@ -36,6 +36,7 @@ This is the Go implementation of the TokenFlow backend service. It acts as the m
   - `GROQ_API_BASE_URL` 
   - `OPENROUTER_API_KEY`
   - `OPENROUTER_API_BASE_URL`
+  - `PYTHON_SERVICE_URL` (optional, defaults to http://localhost:8001)
   - `PORT` (optional, defaults to 8000)
 
 ## Project Structure
@@ -161,6 +162,7 @@ GROQ_API_KEY=your_groq_key_here
 GROQ_API_BASE_URL=https://api.groq.com/openai/v1
 OPENROUTER_API_KEY=your_openrouter_key_here
 OPENROUTER_API_BASE_URL=https://openrouter.ai/api/v1
+PYTHON_SERVICE_URL=http://localhost:8001
 ENVIRONMENT=development
 ```
 

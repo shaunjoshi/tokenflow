@@ -16,6 +16,7 @@ type Config struct {
 	OpenRouterBaseURL      string
 	GroqAPIKey             string
 	GroqBaseURL            string
+	PythonServiceURL       string
 }
 
 var AppConfig Config
@@ -35,6 +36,7 @@ func Init() {
 		OpenRouterBaseURL:      getEnv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1"),
 		GroqAPIKey:             getEnv("GROQ_API_KEY", ""),
 		GroqBaseURL:            getEnv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1"),
+		PythonServiceURL:       getEnv("PYTHON_SERVICE_URL", "http://localhost:8001"),
 	}
 
 	// Only log essential startup info

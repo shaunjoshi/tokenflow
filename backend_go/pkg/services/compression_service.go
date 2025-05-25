@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"tokenflow/pkg/config"
 	"tokenflow/pkg/models"
 )
 
@@ -33,7 +34,7 @@ func (s *CompressionService) CompressText(text string, ratio float64) (*models.C
 	}
 
 	resp, err := http.Post(
-		"http://localhost:8001/compress",
+		config.AppConfig.PythonServiceURL+"/compress",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
