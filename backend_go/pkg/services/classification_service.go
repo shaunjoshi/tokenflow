@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"tokenflow/pkg/models"
 )
@@ -28,8 +27,6 @@ func (s *ClassificationService) ClassifyPrompt(prompt string, categories []strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %v", err)
 	}
-
-	log.Printf("ClassificationService: Classifying prompt with %d categories", len(categories))
 
 	resp, err := http.Post(
 		"http://localhost:8001/classify",
@@ -62,6 +59,5 @@ func (s *ClassificationService) ClassifyPrompt(prompt string, categories []strin
 		return nil, fmt.Errorf("failed to decode classification response: %v", err)
 	}
 
-	log.Printf("ClassificationService: Classification successful - category: %s", result.TopCategory)
 	return &result, nil
 }

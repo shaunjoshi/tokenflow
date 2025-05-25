@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"log"
 	"tokenflow/pkg/config"
 	"tokenflow/pkg/models"
 
@@ -22,8 +21,6 @@ func NewModelService() *ModelService {
 	groqConfig := openai.DefaultConfig(config.AppConfig.GroqAPIKey)
 	groqConfig.BaseURL = config.AppConfig.GroqBaseURL
 	groqClient := openai.NewClientWithConfig(groqConfig)
-
-	log.Printf("ModelService: Initialized with Groq base URL: %s", groqConfig.BaseURL)
 
 	return &ModelService{
 		openRouterClient: openRouterClient,

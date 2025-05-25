@@ -23,26 +23,22 @@ func NewClassificationHandler(classificationService *services.ClassificationServ
 func (h *ClassificationHandler) ClassifyPrompt(c *gin.Context) {
 	var req models.ClassificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("ClassificationHandler: Error binding JSON for /classify: %v", err)
+		log.Printf("ERROR: ClassificationHandler: Invalid JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
 		return
 	}
 
 	if len(req.PossibleCategories) == 0 {
-		log.Printf("ClassificationHandler: No categories provided, using default categories.")
 		req.PossibleCategories = models.DefaultModelCategories
 	}
 
-	log.Printf("ClassificationHandler: Received classification request. Prompt (first 50): %s... Categories: %v", req.Prompt[:min(len(req.Prompt), 50)], req.PossibleCategories)
-
 	classification, err := h.classificationService.ClassifyPrompt(req.Prompt, req.PossibleCategories, req.MultiLabel)
 	if err != nil {
-		log.Printf("ClassificationHandler: Error from ClassificationService: %v", err)
+		log.Printf("ERROR: ClassificationHandler: Service error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to classify prompt: %v", err)})
 		return
 	}
 
-	log.Printf("ClassificationHandler: Classification successful. Top category: %s", classification.TopCategory)
 	c.JSON(http.StatusOK, classification)
 }
 

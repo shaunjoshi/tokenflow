@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 	"tokenflow/pkg/models"
 	"tokenflow/pkg/services"
@@ -22,21 +22,18 @@ func NewCompressionHandler(compressionService *services.CompressionService) *Com
 func (h *CompressionHandler) CompressText(c *gin.Context) {
 	var req models.CompressionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fmt.Printf("Error binding JSON: %v\n", err)
+		log.Printf("ERROR: CompressionHandler: Invalid JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Printf("Received compression request: text=%s, ratio=%.2f\n", req.Text, req.Ratio)
-
 	// Compress the text
 	result, err := h.compressionService.CompressText(req.Text, req.Ratio)
 	if err != nil {
-		fmt.Printf("Error compressing text: %v\n", err)
+		log.Printf("ERROR: CompressionHandler: Service error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Printf("Compression successful: original_tokens=%d, compressed_tokens=%d\n", result.OriginalTokens, result.CompressedTokens)
 	c.JSON(http.StatusOK, result)
 }

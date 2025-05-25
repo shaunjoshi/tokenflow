@@ -37,12 +37,8 @@ func Init() {
 		GroqBaseURL:            getEnv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1"),
 	}
 
-	// Log configuration (excluding sensitive values)
-	log.Printf("Configuration loaded:")
-	log.Printf("Port: %s", AppConfig.Port)
-	log.Printf("Environment: %s", AppConfig.Environment)
-	log.Printf("OpenRouter Base URL: %s", AppConfig.OpenRouterBaseURL)
-	log.Printf("Groq Base URL: %s", AppConfig.GroqBaseURL)
+	// Only log essential startup info
+	log.Printf("TokenFlow backend starting on port %s (%s environment)", AppConfig.Port, AppConfig.Environment)
 
 	// Verify API keys are set
 	if AppConfig.GroqAPIKey == "" {

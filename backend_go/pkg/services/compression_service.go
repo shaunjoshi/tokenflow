@@ -32,8 +32,6 @@ func (s *CompressionService) CompressText(text string, ratio float64) (*models.C
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	fmt.Printf("Sending request to Python service: %s\n", string(jsonData))
-
 	resp, err := http.Post(
 		"http://localhost:8001/compress",
 		"application/json",
