@@ -24,43 +24,42 @@ func NewModelHandler(modelService *services.ModelService, classService *services
 	}
 }
 
-// SSE Protocol: Browser opens persistent connection, server pushes data as it becomes available
+// This sets up the SSE headers which tells the browser that the backend will be streaming events to the browser
 func (h *ModelHandler) setupSSEHeaders(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream") // Tells browser: "expect streaming text/event-stream format"
-	c.Header("Cache-Control", "no-cache")         // Prevents proxies/browsers from caching stream data
-	c.Header("Connection", "keep-alive")          // HTTP/1.1: keep connection open for multiple messages
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive") // Keep the connection open for our goroutine
 }
 
-// Browser receives: "data: {json}\n\ndata: {json}\n\n..." in real-time
+// This function streams the response from the background goroutine to the client using Server-Sent Events (SSE)
 func (h *ModelHandler) streamResponse(c *gin.Context, streamChan <-chan interface{}, errorChan <-chan error) {
 	c.Stream(func(w io.Writer) bool {
-		// Go's select statement enables concurrent event handling - key to SSE efficiency
+
+		// This is the core of the streaming - we are listening to the channels and sending the data to the browser
 		select {
 
-		// Case 1: New data arrives from LLM (e.g., token "Hello", "world", "!")
+		// When we get data from our background goroutine, stream it immediately
 		case data, ok := <-streamChan:
 			if !ok {
-				return false // Channel closed = end of stream
+				return false
 			}
 
-			// SSE Message Format: Each message must be prefixed with "data: "
-			// Browser JS receives: addEventListener('message', (event) => console.log(event.data))
+			// Marshal the data into a JSON string
 			eventData, _ := json.Marshal(data)
-			fmt.Fprintf(w, "data: %s\n\n", eventData) // "\n\n" signals end of message
+			fmt.Fprintf(w, "data: %s\n\n", eventData)
 
-			// Critical: Flush immediately sends bytes to browser (no buffering)
-			// Without flush, browser waits for full response = no real-time streaming
+			// Send the data immediately to the browser
 			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush() // Forces TCP packet to browser immediately
+				flusher.Flush()
 			}
-			return true // Keep streaming connection alive
+			return true
 
-		// Case 2: Error occurred (network, API, parsing, etc.)
+		// Errors are first class data and also send to the browser
 		case err := <-errorChan:
 			if err != nil {
-				// Send error as SSE event - browser can handle gracefully
+
 				errorData := map[string]interface{}{
-					"event": "error", // Browser can filter: addEventListener('error', handler)
+					"event": "error",
 					"data":  map[string]string{"error": "Stream error", "detail": err.Error()},
 				}
 				eventData, _ := json.Marshal(errorData)
@@ -69,17 +68,16 @@ func (h *ModelHandler) streamResponse(c *gin.Context, streamChan <-chan interfac
 					flusher.Flush()
 				}
 			}
-			return false // Close SSE connection on error
-
-		// Case 3: Browser closed tab/navigated away
-		case <-c.Request.Context().Done():
-			// Context cancellation prevents goroutine leaks when client disconnects
 			return false // Clean shutdown
+
+		// graceful cleanup when the users closes the browser tab
+		case <-c.Request.Context().Done():
+			return false
 		}
 	})
 }
 
-// getCategories returns categories to use for classification
+// This function returns the categories for the prompt
 func (h *ModelHandler) getCategories(provided []string) []string {
 	if len(provided) == 0 {
 		return models.DefaultModelCategories
@@ -87,7 +85,7 @@ func (h *ModelHandler) getCategories(provided []string) []string {
 	return provided
 }
 
-// createMetadata creates metadata for streaming
+// This function creates the metadata for the prompt
 func (h *ModelHandler) createMetadata(classification *models.ClassificationResponse, selectedModel string) map[string]interface{} {
 	metadata := map[string]interface{}{
 		"selected_model": selectedModel,
@@ -106,6 +104,7 @@ func (h *ModelHandler) createMetadata(classification *models.ClassificationRespo
 	return metadata
 }
 
+// This function streams the model selection
 func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 	var req models.ModelSelectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -113,55 +112,70 @@ func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 		return
 	}
 
-	// Step 1: Setup SSE connection - browser now expects streaming data
+	// Add safety checks
+	if h.classificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Classification service not initialized"})
+		return
+	}
+	if h.modelService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Model service not initialized"})
+		return
+	}
+
+	// Sets up our streaming headers
 	h.setupSSEHeaders(c)
 
-	// Step 2: Create Go channels for inter-goroutine communication
-	// This enables: Main goroutine (SSE) + Background goroutine (LLM processing)
-	streamChan := make(chan interface{}) // Data pipeline: LLM → Browser
-	errorChan := make(chan error)        // Error pipeline: Any error → Browser
+	// Create channels for communication between background goroutine and main HTTP handler goroutine
+	streamChan := make(chan interface{})
+	errorChan := make(chan error)
 
-	// Step 3: Background processing in separate goroutine
-	// Why goroutine? Prevents blocking HTTP response while waiting for LLM
+	// Background goroutine needed to:
+	// - Keep HTTP connection open for SSE
+	// - Handle long-running classification and streaming tasks
+	// - Process request asynchronously while streaming responses
 	go func() {
-		defer close(streamChan) // Signal: no more data coming
-		defer close(errorChan)  // Signal: no more errors coming
+		// Ensures our channels get closed no matter what happens
+		defer close(streamChan)
+		defer close(errorChan)
 
-		// Classify and select model
+		// Get the categories for the prompt
 		categories := h.getCategories(req.PossibleCategories)
 		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, categories, false)
 		if err != nil {
+			// Send the error through our channel
 			errorChan <- fmt.Errorf("classification failed: %v", err)
 			return
 		}
 
+		// Add safety check for classification result
+		if classification == nil {
+			errorChan <- fmt.Errorf("classification returned nil result")
+			return
+		}
+
+		// Select the model for the category
 		selectedModel := h.modelService.SelectModelForCategory(classification.TopCategory)
 
-		// SSE Event 1: Send metadata immediately (user sees which model was selected)
-		// Browser receives: data: {"event": "metadata", "data": {"selected_model": "llama-3.3-70b"}}
+		// Send metadata first so the user knows which model we picked
 		metadata := h.createMetadata(classification, selectedModel)
 		streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
 
-		// SSE Event 2-N: Stream LLM tokens as they arrive from Groq API
-		// Browser receives: data: {"event": "text_chunk", "data": "Hello"}
-		//                  data: {"event": "text_chunk", "data": " world"}
-		//                  data: {"event": "text_chunk", "data": "!"}
+		// Now stream the actual LLM response from the model service call
 		err = h.modelService.StreamCompletion(req.Prompt, selectedModel, req.Temperature, req.TopP, req.MaxTokens, streamChan)
 		if err != nil {
 			errorChan <- err
 			return
 		}
 
-		// SSE Final Event: Signal completion
-		// Browser receives: data: {"event": "end_stream", "data": "Stream finished"}
+		// Send completion signal so the frontend knows we're done
 		streamChan <- map[string]interface{}{"event": "end_stream", "data": "Stream finished"}
 	}()
 
-	// Step 4: Handle SSE streaming using Go's concurrent select pattern
-	// This simultaneously listens for: data, errors, client disconnection
+	// The streamResponse method handles reading from these channels and sending the data to the client via SSE
 	h.streamResponse(c, streamChan, errorChan)
 }
 
+// This function streams the direct generation of the prompt
 func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 	var req models.GenerateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -169,27 +183,25 @@ func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 		return
 	}
 
-	// SSE Demo: Same pattern as above but with user-specified model
 	h.setupSSEHeaders(c)
 	streamChan := make(chan interface{})
 	errorChan := make(chan error)
 
-	// Background goroutine handles LLM communication while SSE streams to browser
 	go func() {
 		defer close(streamChan)
 		defer close(errorChan)
 
-		// Optional classification for metadata
+		// Classify the prompt
 		classification, err := h.classificationService.ClassifyPrompt(req.Prompt, models.DefaultModelCategories, false)
 		if err != nil {
-			classification = nil // Handle gracefully - don't block generation
+			classification = nil
 		}
 
-		// SSE Flow: metadata → token stream → end signal
+		// Create the metadata for the prompt
 		metadata := h.createMetadata(classification, req.Model)
 		streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
 
-		// Real-time token streaming: each token sent immediately as generated
+		// Now stream the actual LLM response from the model service call
 		err = h.modelService.StreamCompletion(req.Prompt, req.Model, req.Temperature, req.TopP, req.MaxTokens, streamChan)
 		if err != nil {
 			errorChan <- err
@@ -199,7 +211,6 @@ func (h *ModelHandler) StreamDirectGeneration(c *gin.Context) {
 		streamChan <- map[string]interface{}{"event": "end_stream", "data": "Stream finished"}
 	}()
 
-	// Demonstrate SSE handling with concurrent channel operations
 	h.streamResponse(c, streamChan, errorChan)
 }
 

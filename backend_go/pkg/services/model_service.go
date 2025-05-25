@@ -31,6 +31,9 @@ func NewModelService() *ModelService {
 	}
 }
 
+// This is the core function that streams the completion of the prompt to the client and the main api request handler
+// Core API entrypoint that streams LLM completions to the client via SSE
+// Takes prompt and generation parameters, streams response chunks through streamChan
 func (s *ModelService) StreamCompletion(
 	prompt string,
 	model string,
@@ -74,6 +77,7 @@ func (s *ModelService) StreamCompletion(
 	return nil
 }
 
+// This function selects the model for the category
 func (s *ModelService) SelectModelForCategory(category string) string {
 	if ranking, ok := models.ModelRankings[category]; ok {
 		for _, model := range ranking.Models {

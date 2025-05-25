@@ -155,16 +155,15 @@ const ModelSelectionChatView: React.FC<ModelSelectionChatViewProps> = ({ session
     try {
       const requestBody = {
         prompt: inputText,
-        model: "llama-3.3-70b-versatile",
         temperature: 0.7,
         top_p: 0.9,
         max_tokens: 300
       };
 
       console.log('[ModelSelectionChatView] Sending request:', requestBody);
-      console.log('[ModelSelectionChatView] API URL:', `${API_BASE_URL}/api/generate`);
+      console.log('[ModelSelectionChatView] API URL:', `${API_BASE_URL}/api/models/select`);
 
-      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+      const response = await fetch(`${API_BASE_URL}/api/models/select`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
