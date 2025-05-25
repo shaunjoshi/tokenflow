@@ -129,10 +129,7 @@ func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 	streamChan := make(chan interface{})
 	errorChan := make(chan error)
 
-	// Background goroutine needed to:
-	// - Keep HTTP connection open for SSE
-	// - Handle long-running classification and streaming tasks
-	// - Process request asynchronously while streaming responses
+	// Background goroutine handles SSE connection, classification, and async streaming
 	go func() {
 		// Ensures our channels get closed no matter what happens
 		defer close(streamChan)
@@ -160,7 +157,8 @@ func (h *ModelHandler) StreamModelSelection(c *gin.Context) {
 		metadata := h.createMetadata(classification, selectedModel)
 		streamChan <- map[string]interface{}{"event": "metadata", "data": metadata}
 
-		// Now stream the actual LLM response from the model service call
+		// Stream LLM response in background to prevent browser timeouts
+		// React frontend needs real-time updates via SSE
 		err = h.modelService.StreamCompletion(req.Prompt, selectedModel, req.Temperature, req.TopP, req.MaxTokens, streamChan)
 		if err != nil {
 			errorChan <- err
