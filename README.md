@@ -173,6 +173,97 @@ tokenflow/
 }
 ```
 
+## Request Lifecycle: `/api/models/select`
+
+The following diagram illustrates the request lifecycle for the `/api/models/select` endpoint, which automatically selects the best model based on prompt classification and streams the LLM response:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant ModelHandler
+    participant ClassificationService
+    participant ModelService
+    participant External APIs
+    
+    Client->>+ModelHandler: POST /api/models/select
+    Note over Client,ModelHandler: JSON: {prompt, temperature, topP, maxTokens, possibleCategories}
+    
+    ModelHandler->>ModelHandler: Setup SSE headers & create Go channels (streamChan, errorChan)
+    
+    par Background Goroutine
+        ModelHandler->>+ClassificationService: ClassifyPrompt() - calls Python service
+        ClassificationService-->>-ModelHandler: {topCategory, confidenceScore}
+        
+        ModelHandler->>+ModelService: SelectModelForCategory(topCategory)
+        ModelService-->>-ModelHandler: selectedModel
+        
+        ModelHandler->>Client: SSE metadata event
+        Note over ModelHandler,Client: Go struct serialized to JSON
+        
+        ModelHandler->>+ModelService: StreamCompletion() - writes to streamChan
+        ModelService->>+External APIs: Groq/OpenRouter API calls
+        
+        loop Stream chunks via Go channel
+            External APIs-->>ModelService: Response chunks
+            ModelService->>ModelHandler: streamChan <- chunk
+        end
+        
+        External APIs-->>-ModelService: Stream complete
+        ModelService-->>-ModelHandler: Close streamChan
+        
+    and Main Goroutine
+        loop Listen on Go channels with select{}
+            alt Data from streamChan
+                ModelHandler->>Client: SSE text_chunk event
+            else Error from errorChan
+                ModelHandler->>Client: SSE error event
+            else Client context cancelled
+                ModelHandler->>ModelHandler: Cleanup & return
+            end
+        end
+    end
+    
+    ModelHandler->>Client: SSE end_stream event
+    ModelHandler-->>-Client: Close connection
+```
+
+### Step-by-Step Request Flow
+
+1. **Client Request**: Client sends `POST /api/models/select` with JSON payload containing prompt, temperature, topP, maxTokens, and possibleCategories
+
+2. **Handler Setup**: ModelHandler validates the request and sets up Server-Sent Events (SSE) headers for streaming response
+
+3. **Go Channel Creation**: ModelHandler creates two Go channels:
+   - `streamChan` - for streaming LLM response chunks
+   - `errorChan` - for error handling
+
+4. **Concurrent Processing**: Two goroutines run in parallel:
+
+   **Background Goroutine (ML Processing):**
+   - **Classification**: Calls ClassificationService which makes HTTP request to Python backend
+   - **Model Selection**: Based on classification result, selects appropriate LLM model
+   - **Metadata Event**: Sends SSE event with selected model and classification info
+   - **Stream Setup**: Calls ModelService.StreamCompletion() which writes to `streamChan`
+   - **LLM API Calls**: Makes streaming requests to Groq/OpenRouter APIs
+   - **Channel Operations**: Each response chunk is sent via `streamChan <- chunk`
+   - **Cleanup**: Closes `streamChan` when stream completes
+
+   **Main Goroutine (SSE Management):**
+   - **Channel Listening**: Uses Go's `select{}` statement to listen on multiple channels
+   - **Stream Forwarding**: Forwards data from `streamChan` as SSE text_chunk events
+   - **Error Handling**: Forwards errors from `errorChan` as SSE error events  
+   - **Context Cancellation**: Handles client disconnection and cleanup
+
+5. **Stream Completion**: Sends final SSE end_stream event and closes connection
+
+### Key Components:
+
+1. **Concurrent Architecture**: Main HTTP goroutine handles SSE streaming while background goroutine processes ML tasks
+2. **Service Integration**: Classification service calls Python backend, model service integrates with Groq API
+3. **Real-time Streaming**: Server-Sent Events provide immediate feedback to client
+4. **Error Handling**: Errors are streamed as events, allowing graceful frontend handling
+5. **Resource Management**: Proper channel cleanup and context cancellation
+
 ## Architecture Benefits
 
 1. **Performance**: Go handles concurrent HTTP requests efficiently
